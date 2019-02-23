@@ -32,6 +32,6 @@ To dissect tcpdump-recorded file, you can use `-r <pcapfile>` option. For exampl
     wireshark -X lua_script:./confundo.lua -r confundo.pcap
 
 ## Names of Contributers   
-Arpi Beshlikyan, UID HERE
-Melissa Cox, UID HERE
+Arpi Beshlikyan, 404239449
+Melissa Cox, 704800126
 Akshara Sundararajan, 404731846
