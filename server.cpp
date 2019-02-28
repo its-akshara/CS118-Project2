@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <errno.h>
+#include <stdint.h>
 #include <unistd.h>
 
 #include <iostream>
@@ -22,7 +23,80 @@ using namespace std;
 
 const int NUMBER_OF_ARGS = 2;
 const int MAX_CLIENT_NUMBER = 12;
-const int PACKET_SIZE = 1024;
+const int DATA_SIZE = 512;
+const int HEADER_SIZE = 12;
+const int PACKET_SIZE = HEADER_SIZE + DATA_SIZE;
+
+const int NUM_MASK1 = 0xff000000;
+const int NUM_MASK2 = 0x00ff0000;
+const int NUM_MASK3 = 0x0000ff00;
+const int NUM_MASK4 = 0x000000ff;
+const int NUM_RIGHT_OFFSET1=24;
+const int NUM_RIGHT_OFFSET2=16;
+const int NUM_RIGHT_OFFSET3=8;
+const long CONN_MASK =0xffff0000;
+const int CONN_RIGHT_OFFSET = 16;
+const int ACK_MASK = 4;
+const int ACK_OFFSET = 2;
+const int SYN_MASK = 2;
+const int SYN_OFFSET = 1;
+const int FIN_MASK = 1;
+const int FLAG_POS = 11;
+
+struct Header
+{
+  uint32_t sequenceNumber;
+  uint32_t acknowledgementNumber;
+  uint16_t connectionID;
+  bool ACKflag;
+  bool SYNflag;
+  bool FINflag;
+};
+
+// pass by reference
+void updateArrayIndexToNumberBitwise(char header[HEADER_SIZE+1], int index, uint32_t number)
+{
+  uint32_t network_byte_order = htonl(number);
+  header[index] = ((NUM_MASK1&network_byte_order)>>NUM_RIGHT_OFFSET1);
+  header[index+1] = ((NUM_MASK2&network_byte_order)>>NUM_RIGHT_OFFSET2);
+  header[index+2] = ((NUM_MASK3&network_byte_order)>>NUM_RIGHT_OFFSET3);
+  header[index+3] = (NUM_MASK4&network_byte_order);
+}
+
+int32_t getConnIDAndFlags(uint16_t connectionID,bool ACKflag, bool SYNflag, bool FINflag)
+{
+  return ((connectionID<<CONN_RIGHT_OFFSET)&CONN_MASK)|((ACKflag<<ACK_OFFSET)&ACK_MASK)|((SYNflag<<SYN_OFFSET)&SYN_MASK)|(FINflag&
+  FIN_MASK);
+}
+
+// returns a 96 bit(12 byte) array representing the TCP header
+void convertHeaderToByteArray(Header h, char header[HEADER_SIZE])
+{
+  memset(&header[0], 0, HEADER_SIZE);
+  updateArrayIndexToNumberBitwise(header,0,h.sequenceNumber);
+  updateArrayIndexToNumberBitwise(header,4,h.acknowledgementNumber);
+  //an int representing the third 'row' of the header
+  int32_t connIDASF = getConnIDAndFlags(h.connectionID,h.ACKflag,h.SYNflag,h.FINflag);
+  updateArrayIndexToNumberBitwise(header,8,connIDASF);
+}
+
+uint32_t getValueFromBytes(char *h, int index)
+{
+  return ntohl(((uint8_t)h[index]<<NUM_RIGHT_OFFSET1)+((uint8_t)h[index+1]<<NUM_RIGHT_OFFSET2)+((uint8_t)h[index+2]<<NUM_RIGHT_OFFSET3)+h[index+3]);
+}
+
+Header convertByteArrayToHeader(char *h)
+{
+  Header res;
+  res.ACKflag = h[FLAG_POS]&ACK_MASK;
+  res.SYNflag = h[FLAG_POS]&SYN_MASK;
+  res.FINflag = h[FLAG_POS]&FIN_MASK;
+
+  res.sequenceNumber = getValueFromBytes(h,0);
+  res.acknowledgementNumber = getValueFromBytes(h,4);
+  res.connectionID = (getValueFromBytes(h,8)>>16)&~CONN_MASK;
+  return res;
+}
 
 struct Arguments
 {
@@ -168,36 +242,43 @@ void communicate(int clientSockfd, string fileDir, int num)
         
       if(sel_res == -1)
         {
-	  fout.close();
-	  printError("select() failed.");
-	  exitOnError(clientSockfd);
+	          fout.close();
+	          printError("select() failed.");
+	          exitOnError(clientSockfd);
         }
       else if(sel_res==0)
         {
-	  fout.close();
-	  fout.open(getFileName(fileDir,num), ios::out);
-	  fout<<"ERROR: Timeout! Server has not received data from client in more than 15 sec.";
-	  fout.close();
-	  printError("Timeout! Server has not received data from client in more than 15 sec.");
-	  exitOnError(clientSockfd);
+            fout.close();
+            fout.open(getFileName(fileDir,num), ios::out);
+            fout<<"ERROR: Timeout! Server has not received data from client in more than 15 sec.";
+            fout.close();
+            printError("Timeout! Server has not received data from client in more than 15 sec.");
+            exitOnError(clientSockfd);
         }
-        
-      int rec_res = recv(clientSockfd, buf, PACKET_SIZE, 0);
+      struct sockaddr_in clientAddr;
+      socklen_t clientAddrSize = sizeof(clientAddr);
+      
+      int rec_res = recvfrom(clientSockfd, buf, PACKET_SIZE, 0, (struct sockaddr *)&clientAddr,&clientAddrSize);
+
       timeout.tv_sec = 15;
       timeout.tv_usec = 0;
       if (rec_res == -1 && errno!=EWOULDBLOCK)
         {
-	  printError("Error in receiving data");
-	  fout.close();
-	  exitOnError(clientSockfd);
+	        printError("Error in receiving data");
+          fout.close();
+          exitOnError(clientSockfd);
         }
       else if(!rec_res)
         {
-	  break;
+          cout << "Orderly shutdown"<<endl;
+	        break;
         }
-        
-        
-      fout.write(buf, rec_res);
+      printf("What was received:\n%s\n",buf);
+      /*Header packet_header = convertByteArrayToHeader(buf);
+      cout << "Header contents: \n";
+      cout<< "SEQ NO:"<<packet_header.sequenceNumber <<" ACK NO:"<<packet_header.acknowledgementNumber<<endl;
+      cout <<"CONNECTION ID:"<<packet_header.connectionID<<endl;*/
+      fout.write(buf, rec_res);//-HEADER_SIZE);+HEADER_SIZE
         
     }
   fout.close();
@@ -221,7 +302,9 @@ void setupEnvironment(const int sockfd)
 void worker(int clientSockfd, int n, string fileDir)
 {
   setupEnvironment(clientSockfd);
+  // set up handshake
   communicate(clientSockfd, fileDir, n);
+  // end handshake
   close(clientSockfd);
 }
 
@@ -232,9 +315,32 @@ int main(int argc, char **argv)
     
   signal(SIGTERM, sigHandler);
   signal(SIGQUIT, sigHandler);
-    
-  // create a socket using TCP IP
-  int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+/*
+   Header test;
+   test.connectionID = 3;
+   test.acknowledgementNumber = 777;
+   test.sequenceNumber = 99;
+   test.SYNflag = 1;
+   test.ACKflag = 1;
+   test.FINflag = 1;
+
+  char blah[HEADER_SIZE];
+  convertHeaderToByteArray(test,blah);
+  cout << "test header:"<<endl;
+  for(int i = 0; i<12; i++)
+  {
+    cout<<(uint32_t)blah[i]<<" ";
+  }
+  cout <<endl;
+
+  Header back  = convertByteArrayToHeader(blah);
+
+  cout<< "Convert back"<<endl;
+  cout <<back.sequenceNumber<<" "<<back.acknowledgementNumber<<" "<<back.connectionID<<" "<<endl;
+*/
+  
+  // create a socket using UDP IP
+  int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
   setReuse(sockfd);
   setupEnvironment(sockfd);
     
@@ -245,35 +351,9 @@ int main(int argc, char **argv)
   // set socket to listen status
   while (true)
     {
-      if (listen(sockfd, MAX_CLIENT_NUMBER) == -1)
-        {
-	  printError("listen() failed");
-	  exitOnError(sockfd);
-        }
-      else
-        {
-	  // accept a new connection
-	  struct sockaddr_in clientAddr;
-	  socklen_t clientAddrSize = sizeof(clientAddr);
-	  int clientSockfd = accept(sockfd, (struct sockaddr*)&clientAddr, &clientAddrSize);
-            
-	  if (clientSockfd == -1 && errno!=EWOULDBLOCK) {
-	    printError("accept() failed.");
-	    exit(1);
-	  }
-	  else if(clientSockfd==-1)
-            {
-	      continue;
-            }
-            
-	  thread(worker, clientSockfd, client_number, args.fileDir).detach();
-            
-	  client_number++;
-        }
+            worker(sockfd,client_number,args.fileDir);      
+            client_number++;
     }
-    
-  //    
-
   close(sockfd);
     
   return 0;
