@@ -274,6 +274,7 @@ void communicate(int clientSockfd, string fileDir, int num)
 	        break;
         }
       printf("What was received:\n%s\n",buf);
+      cout<<"Return value"<<rec_res<<endl;
       /*Header packet_header = convertByteArrayToHeader(buf);
       cout << "Header contents: \n";
       cout<< "SEQ NO:"<<packet_header.sequenceNumber <<" ACK NO:"<<packet_header.acknowledgementNumber<<endl;

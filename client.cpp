@@ -208,7 +208,7 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
         cout<<endl;
         */
 
-        if (sendto(sockfd, buf_send, HEADER_SIZE + fin.gcount(), MSG_NOSIGNAL, (const sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
+        if (sendto(sockfd, buf, fin.gcount(), 0, (const sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
           {
             printError("Unable to send data to server");
             exitOnError(sockfd);
