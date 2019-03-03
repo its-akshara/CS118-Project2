@@ -79,7 +79,7 @@ void convertHeaderToByteArray(Header h, char header[HEADER_SIZE])
 
 uint32_t getValueFromBytes(char *h, int index)
 {
-  return ntohl(((uint8_t)h[index]<<NUM_RIGHT_OFFSET1)+((uint8_t)h[index+1]<<NUM_RIGHT_OFFSET2)+((uint8_t)h[index+2]<<NUM_RIGHT_OFFSET3)+h[index+3]);
+  return ntohl(((h[index])<<NUM_RIGHT_OFFSET1)|((h[index+1])<<NUM_RIGHT_OFFSET2)|((h[index+2])<<NUM_RIGHT_OFFSET3)|(h[index+3]));
 }
 
 Header convertByteArrayToHeader(char *h)
@@ -175,14 +175,13 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
 	      printError("select() failed.");
 	      exitOnError(sockfd);
       }
-    else if(sel_res==0)
-      {
-	      printError("Timeout! Client has not been able to send data to the server in more than 15 seconds.");
-      	exitOnError(sockfd);
-      }
+    // else if(sel_res==0)
+    //   {
+	  //     printError("Timeout! Client has not been able to send data to the server in more than 15 seconds.");
+    //   	exitOnError(sockfd);
+    //   }
     else
       {
-        /*
         Header temp;
         temp.sequenceNumber = 123;
         temp.acknowledgementNumber = 8;
@@ -202,13 +201,12 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
         cout<<"HEADER:";
         for(int i =0; i<12;i++)
         {
-          cout<<(int8_t)header[i]<<" ";
+          cout<<(int32_t)header[i]<<" ";
 
         }
         cout<<endl;
-        */
 
-        if (sendto(sockfd, buf, fin.gcount(), 0, (const sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
+        if (sendto(sockfd, buf, fin.gcount() + HEADER_SIZE, 0, (const sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
           {
             printError("Unable to send data to server");
             exitOnError(sockfd);

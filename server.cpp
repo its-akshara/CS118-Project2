@@ -13,6 +13,8 @@
 
 #include <iostream>
 #include <fstream>
+#include <iomanip>
+#include <cstdint>
 #include <iostream>
 #include <thread>
 #include <chrono>
@@ -82,7 +84,7 @@ void convertHeaderToByteArray(Header h, char header[HEADER_SIZE])
 
 uint32_t getValueFromBytes(char *h, int index)
 {
-  return ntohl(((uint8_t)h[index]<<NUM_RIGHT_OFFSET1)+((uint8_t)h[index+1]<<NUM_RIGHT_OFFSET2)+((uint8_t)h[index+2]<<NUM_RIGHT_OFFSET3)+h[index+3]);
+  return ntohl(((h[index])<<NUM_RIGHT_OFFSET1)|((h[index+1])<<NUM_RIGHT_OFFSET2)|((h[index+2])<<NUM_RIGHT_OFFSET3)|(h[index+3]));
 }
 
 Header convertByteArrayToHeader(char *h)
@@ -107,6 +109,16 @@ struct Arguments
 void printUsage()
 {
   cerr<< "USAGE: ./server <PORT> <FILE-DIR>\n";
+}
+
+void printInt_32(uint32_t x)
+{
+    cout << setfill('0') << setw(8) << hex << x << '\n';
+}
+
+void printInt_16(uint16_t x)
+{
+    cout << setfill('0') << setw(4) << hex << x << '\n';
 }
 
 void printError(string message)
@@ -246,22 +258,22 @@ void communicate(int clientSockfd, string fileDir, int num)
 	          printError("select() failed.");
 	          exitOnError(clientSockfd);
         }
-      else if(sel_res==0)
-        {
-            fout.close();
-            fout.open(getFileName(fileDir,num), ios::out);
-            fout<<"ERROR: Timeout! Server has not received data from client in more than 15 sec.";
-            fout.close();
-            printError("Timeout! Server has not received data from client in more than 15 sec.");
-            exitOnError(clientSockfd);
-        }
+      // else if(sel_res==0)
+      //   {
+      //       fout.close();
+      //       fout.open(getFileName(fileDir,num), ios::out);
+      //       fout<<"ERROR: Timeout! Server has not received data from client in more than 15 sec.";
+      //       fout.close();
+      //       printError("Timeout! Server has not received data from client in more than 15 sec.");
+      //       exitOnError(clientSockfd);
+      //   }
       struct sockaddr_in clientAddr;
       socklen_t clientAddrSize = sizeof(clientAddr);
       
       int rec_res = recvfrom(clientSockfd, buf, PACKET_SIZE, 0, (struct sockaddr *)&clientAddr,&clientAddrSize);
 
-      timeout.tv_sec = 15;
-      timeout.tv_usec = 0;
+      // timeout.tv_sec = 15;
+      // timeout.tv_usec = 0;
       if (rec_res == -1 && errno!=EWOULDBLOCK)
         {
 	        printError("Error in receiving data");
@@ -270,17 +282,23 @@ void communicate(int clientSockfd, string fileDir, int num)
         }
       else if(!rec_res)
         {
-          cout << "Orderly shutdown"<<endl;
 	        break;
         }
-      printf("What was received:\n%s\n",buf);
+      cout<< "What was received:"<<buf<<endl;
       cout<<"Return value"<<rec_res<<endl;
-      /*Header packet_header = convertByteArrayToHeader(buf);
+      char header[HEADER_SIZE];
+      strncpy(header, buf, HEADER_SIZE);
+      Header packet_header = convertByteArrayToHeader(header);
+      for(int i = 0; i<12; i++)
+      {
+        cout<<(uint32_t)header[i]<<" ";
+      }
+      cout <<endl;
       cout << "Header contents: \n";
       cout<< "SEQ NO:"<<packet_header.sequenceNumber <<" ACK NO:"<<packet_header.acknowledgementNumber<<endl;
-      cout <<"CONNECTION ID:"<<packet_header.connectionID<<endl;*/
-      fout.write(buf, rec_res);//-HEADER_SIZE);+HEADER_SIZE
-        
+      cout <<"CONNECTION ID:"<<packet_header.connectionID<<endl;
+      cout << "SYN:"<<packet_header.SYNflag <<" ACK:"<<packet_header.ACKflag << " FIN:"<<packet_header.FINflag<<endl;
+      fout.write(buf+HEADER_SIZE, rec_res-HEADER_SIZE);//-HEADER_SIZE);+HEADER_SIZE
     }
   fout.close();
 }
@@ -316,7 +334,7 @@ int main(int argc, char **argv)
     
   signal(SIGTERM, sigHandler);
   signal(SIGQUIT, sigHandler);
-/*
+
    Header test;
    test.connectionID = 3;
    test.acknowledgementNumber = 777;
@@ -338,7 +356,7 @@ int main(int argc, char **argv)
 
   cout<< "Convert back"<<endl;
   cout <<back.sequenceNumber<<" "<<back.acknowledgementNumber<<" "<<back.connectionID<<" "<<endl;
-*/
+
   
   // create a socket using UDP IP
   int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
