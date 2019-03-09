@@ -56,7 +56,7 @@ struct Header
 };
 
 // pass by reference
-void updateArrayIndexToNumberBitwise(char header[HEADER_SIZE+1], int index, uint32_t number)
+void updateArrayIndexToNumberBitwise(unsigned char header[HEADER_SIZE+1], int index, uint32_t number)
 {
   uint32_t network_byte_order = htonl(number);
   header[index] = ((NUM_MASK1&network_byte_order)>>NUM_RIGHT_OFFSET1);
@@ -72,7 +72,7 @@ int32_t getConnIDAndFlags(uint16_t connectionID,bool ACKflag, bool SYNflag, bool
 }
 
 // returns a 96 bit(12 byte) array representing the TCP header
-void convertHeaderToByteArray(Header h, char header[HEADER_SIZE])
+void convertHeaderToByteArray(Header h, unsigned char header[HEADER_SIZE])
 {
   memset(&header[0], 0, HEADER_SIZE);
   updateArrayIndexToNumberBitwise(header,0,h.sequenceNumber);
@@ -82,12 +82,12 @@ void convertHeaderToByteArray(Header h, char header[HEADER_SIZE])
   updateArrayIndexToNumberBitwise(header,8,connIDASF);
 }
 
-uint32_t getValueFromBytes(char *h, int index)
+uint32_t getValueFromBytes(unsigned char *h, int index)
 {
-  return ntohl(((h[index])<<NUM_RIGHT_OFFSET1)|((h[index+1])<<NUM_RIGHT_OFFSET2)|((h[index+2])<<NUM_RIGHT_OFFSET3)|(h[index+3]));
+  return (((h[index])<<NUM_RIGHT_OFFSET1)|((h[index+1])<<NUM_RIGHT_OFFSET2)|((h[index+2])<<NUM_RIGHT_OFFSET3)|(h[index+3]));
 }
 
-Header convertByteArrayToHeader(char *h)
+Header convertByteArrayToHeader(unsigned char *h)
 {
   Header res;
   res.ACKflag = h[FLAG_POS]&ACK_MASK;
@@ -207,16 +207,16 @@ struct sockaddr_in createServerAddr(const int sockfd, const int port)
 {
   // bind address to socket
   struct sockaddr_in addr;
+  memset((char *)&addr, 0, sizeof(addr));
   addr.sin_family = AF_INET;
   addr.sin_port = htons(port);     // short, network byte order
-  addr.sin_addr.s_addr = INADDR_ANY;
-  memset(addr.sin_zero, '\0', sizeof(addr.sin_zero));
+  addr.sin_addr.s_addr = htonl(INADDR_ANY);
   return addr;
 }
 
 void bindSocket(const int sockfd, const sockaddr_in addr)
 {
-  if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) == -1)
+  if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) <0)
     {
       printError("bind() failed.");
       exitOnError(sockfd);
@@ -246,18 +246,18 @@ void communicate(int clientSockfd, string fileDir, int num)
     {
       memset(buf, '\0', sizeof(buf));
         
-      FD_CLR(clientSockfd,&readfds);
-      FD_ZERO(&readfds);
-      FD_SET(clientSockfd, &readfds);
+      // FD_CLR(clientSockfd,&readfds);
+      // FD_ZERO(&readfds);
+      // FD_SET(clientSockfd, &readfds);
         
-      int sel_res = select(clientSockfd+1,&readfds,NULL,NULL,&timeout);
+      /*int sel_res = select(clientSockfd+1,&readfds,NULL,NULL,&timeout);
         
       if(sel_res == -1)
         {
 	          fout.close();
 	          printError("select() failed.");
 	          exitOnError(clientSockfd);
-        }
+        }*/
       // else if(sel_res==0)
       //   {
       //       fout.close();
@@ -284,21 +284,25 @@ void communicate(int clientSockfd, string fileDir, int num)
         {
 	        break;
         }
-      cout<< "What was received:"<<buf<<endl;
-      cout<<"Return value"<<rec_res<<endl;
-      char header[HEADER_SIZE];
-      strncpy(header, buf, HEADER_SIZE);
-      Header packet_header = convertByteArrayToHeader(header);
-      for(int i = 0; i<12; i++)
+      if(rec_res > 0)
       {
-        cout<<(uint32_t)header[i]<<" ";
+        cout<< "What was received:"<<buf<<endl;
+        cout<<"Return value"<<rec_res<<endl;
+        unsigned char header[HEADER_SIZE];
+        memcpy(header, buf, HEADER_SIZE);
+        Header packet_header = convertByteArrayToHeader(header);
+        for(int i = 0; i<12; i++)
+        {
+          cout<<(uint32_t)header[i]<<" ";
+        }
+        cout <<endl;
+        cout << "Header contents: \n";
+        cout<< "SEQ NO:"<<packet_header.sequenceNumber <<" ACK NO:"<<packet_header.acknowledgementNumber<<endl;
+        cout <<"CONNECTION ID:"<<packet_header.connectionID<<endl;
+        cout << "SYN:"<<packet_header.SYNflag <<" ACK:"<<packet_header.ACKflag << " FIN:"<<packet_header.FINflag<<endl;
+        fout.write(buf+HEADER_SIZE, rec_res-HEADER_SIZE);//-HEADER_SIZE);+HEADER_SIZE
       }
-      cout <<endl;
-      cout << "Header contents: \n";
-      cout<< "SEQ NO:"<<packet_header.sequenceNumber <<" ACK NO:"<<packet_header.acknowledgementNumber<<endl;
-      cout <<"CONNECTION ID:"<<packet_header.connectionID<<endl;
-      cout << "SYN:"<<packet_header.SYNflag <<" ACK:"<<packet_header.ACKflag << " FIN:"<<packet_header.FINflag<<endl;
-      fout.write(buf+HEADER_SIZE, rec_res-HEADER_SIZE);//-HEADER_SIZE);+HEADER_SIZE
+      
     }
   fout.close();
 }
@@ -343,7 +347,7 @@ int main(int argc, char **argv)
    test.ACKflag = 1;
    test.FINflag = 1;
 
-  char blah[HEADER_SIZE];
+  unsigned char blah[HEADER_SIZE];
   convertHeaderToByteArray(test,blah);
   cout << "test header:"<<endl;
   for(int i = 0; i<12; i++)
@@ -360,6 +364,13 @@ int main(int argc, char **argv)
   
   // create a socket using UDP IP
   int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+  if(sockfd < 0)
+  {
+    printError("fcntl() failed");
+    exit(1);
+  }
+
   setReuse(sockfd);
   setupEnvironment(sockfd);
     
@@ -371,7 +382,7 @@ int main(int argc, char **argv)
   while (true)
     {
             worker(sockfd,client_number,args.fileDir);      
-            client_number++;
+           // client_number++;
     }
   close(sockfd);
     
