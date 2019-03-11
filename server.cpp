@@ -161,7 +161,7 @@ void exitOnError(int sockfd)
 void createDirIfNotExists(string path)
 {
   struct stat s;
-
+    
   if(!(stat(path.c_str(), &s) == 0 &&S_ISDIR(s.st_mode)))
     {
       if(mkdir(path.c_str(), 0777)<0)
@@ -169,7 +169,7 @@ void createDirIfNotExists(string path)
 	  printError("Unable to create directory.");
 	  exit(1);
         }
-
+        
     }
 }
 
@@ -182,14 +182,14 @@ Arguments parseArguments(int argc, char**argv)
       exit(1);
     }
   Arguments args;
-
+    
   // port
   args.port = parsePort(argv);
-
+    
   // directory
   createDirIfNotExists(string(argv[2]));
   args.fileDir = (string) argv[2];
-
+    
   return args;
 }
 
@@ -228,52 +228,30 @@ string getFileName(string fileDir, int num)
   return fileDir +"/" + to_string(num) + ".file";
 }
 
-void communicate(int clientSockfd, string fileDir, int num)
+void listenForPackets(int clientSockfd, string fileDir)
 {
   // read/write data from/into the connection
   bool isEnd = false;
   char buf[PACKET_SIZE] = {0};
   fstream fout;
-  fout.open(getFileName(fileDir,num), ios::out);
-
-  fd_set readfds;
-
+  int num = 0;
+    
+  // fd_set readfds;
+    
   struct timeval timeout;
   timeout.tv_sec = 15;
   timeout.tv_usec = 0;
-
+    
   while (!isEnd)
     {
       memset(buf, '\0', sizeof(buf));
-
-      // FD_CLR(clientSockfd,&readfds);
-      // FD_ZERO(&readfds);
-      // FD_SET(clientSockfd, &readfds);
-
-      /*int sel_res = select(clientSockfd+1,&readfds,NULL,NULL,&timeout);
-
-      if(sel_res == -1)
-        {
-	          fout.close();
-	          printError("select() failed.");
-	          exitOnError(clientSockfd);
-        }*/
-      // else if(sel_res==0)
-      //   {
-      //       fout.close();
-      //       fout.open(getFileName(fileDir,num), ios::out);
-      //       fout<<"ERROR: Timeout! Server has not received data from client in more than 15 sec.";
-      //       fout.close();
-      //       printError("Timeout! Server has not received data from client in more than 15 sec.");
-      //       exitOnError(clientSockfd);
-      //   }
       struct sockaddr_in clientAddr;
       socklen_t clientAddrSize = sizeof(clientAddr);
-
+      
       int rec_res = recvfrom(clientSockfd, buf, PACKET_SIZE, 0, (struct sockaddr *)&clientAddr,&clientAddrSize);
 
-      // timeout.tv_sec = 15;
-      // timeout.tv_usec = 0;
+      timeout.tv_sec = 10;
+      timeout.tv_usec = 0;
       if (rec_res == -1 && errno!=EWOULDBLOCK)
         {
 	        printError("Error in receiving data");
@@ -295,15 +273,24 @@ void communicate(int clientSockfd, string fileDir, int num)
         {
           cout<<(uint32_t)header[i]<<" ";
         }
+        // print details
+        // if SYN then start 3 way handshake -> create new connection state
+        
+        // send SYN ACK
+
+        // if ACK
+
+        // if FIN update connection state
+
         cout <<endl;
         cout << "Header contents: \n";
         cout<< "SEQ NO:"<<packet_header.sequenceNumber <<" ACK NO:"<<packet_header.acknowledgementNumber<<endl;
         cout <<"CONNECTION ID:"<<packet_header.connectionID<<endl;
         cout << "SYN:"<<packet_header.SYNflag <<" ACK:"<<packet_header.ACKflag << " FIN:"<<packet_header.FINflag<<endl;
+        fout.open(getFileName(fileDir,num), ios::out);
         fout.write(buf+HEADER_SIZE, rec_res-HEADER_SIZE);//-HEADER_SIZE);+HEADER_SIZE
-        //TODO: Make the fout.write actually write to a file
       }
-
+      
     }
   fout.close();
 }
@@ -327,7 +314,7 @@ void worker(int clientSockfd, int n, string fileDir)
 {
   setupEnvironment(clientSockfd);
   // set up handshake
-  communicate(clientSockfd, fileDir, n);
+  listenForPackets(clientSockfd, fileDir);
   // end handshake
   close(clientSockfd);
 }
@@ -336,7 +323,7 @@ int main(int argc, char **argv)
 {
   int client_number  = 1;
   Arguments args = parseArguments(argc, argv);
-
+    
   signal(SIGTERM, sigHandler);
   signal(SIGQUIT, sigHandler);
 
@@ -360,11 +347,9 @@ int main(int argc, char **argv)
   Header back  = convertByteArrayToHeader(blah);
 
   cout<< "Convert back"<<endl;
-  //@Akshara changed this bc my smol brain can't remember the order of all these numbers
-  //TODO: @Melissa vvv change this back vvv
-  //cout <<back.sequenceNumber<<" "<<back.acknowledgementNumber<<" "<<back.connectionID<<" "<<endl;
-  cout << "Seq num: " << back.sequenceNumber << "\nAck num: " << back.acknowledgementNumber << "\nConnection ID: " << back.connectionID << "\n----\n";
+  cout <<back.sequenceNumber<<" "<<back.acknowledgementNumber<<" "<<back.connectionID<<" "<<endl;
 
+  
   // create a socket using UDP IP
   int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 
@@ -376,18 +361,18 @@ int main(int argc, char **argv)
 
   setReuse(sockfd);
   setupEnvironment(sockfd);
-
+    
   struct sockaddr_in addr = createServerAddr(sockfd, args.port);
-
+    
   bindSocket(sockfd, addr);
-
+    
   // set socket to listen status
   while (true)
     {
-            worker(sockfd,client_number,args.fileDir);
-           // client_number++;
+      worker(sockfd,client_number,args.fileDir);      
     }
   close(sockfd);
-
+    
   return 0;
 }
+

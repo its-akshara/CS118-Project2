@@ -153,23 +153,23 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
   fstream fin;
   fin.open(filename, ios::in);
   char buf[PACKET_SIZE] = {0};
-
+    
   fd_set writefds;
-
+    
   struct timeval timeout;
   timeout.tv_sec = 10;
   timeout.tv_usec = 0;
-
+    
   do {
     fin.read(buf, DATA_SIZE);
-
+        
     FD_CLR(sockfd,&writefds);
     FD_ZERO(&writefds);
     FD_SET(sockfd, &writefds);
-
-
+        
+        
     int sel_res = select(sockfd+1,NULL,&writefds,NULL,&timeout);
-
+        
     if(sel_res == -1)
       {
 	      printError("select() failed.");
@@ -183,12 +183,12 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
     else
       {
         Header temp;
-        temp.sequenceNumber = 12345;
-        temp.acknowledgementNumber = 0;
+        temp.sequenceNumber = 123;
+        temp.acknowledgementNumber = 8;
         temp.connectionID = 0;
-        temp.ACKflag = 1;
-        temp.SYNflag = 0;
-        temp.FINflag = 1;
+        temp.ACKflag = 0;
+        temp.SYNflag = 1;
+        temp.FINflag = 0;
         char buf_send[HEADER_SIZE+fin.gcount()];
         char header[HEADER_SIZE];
         convertHeaderToByteArray(temp,header);
@@ -234,7 +234,7 @@ string parseHost(char **argv)
 {
   struct addrinfo hints, *info;
   hints.ai_family = AF_INET;
-
+    
   if(getaddrinfo(argv[1], NULL,&hints,&info))
     {
       printError("Host name is invalid.");
@@ -243,7 +243,7 @@ string parseHost(char **argv)
     }
   char addrbuf[INET_ADDRSTRLEN + 1];
   const char *addr = inet_ntop(info->ai_family, &(((struct sockaddr_in *)info->ai_addr)->sin_addr),addrbuf,sizeof(addrbuf));
-
+    
   return (string)addr;
 }
 
@@ -256,15 +256,15 @@ Arguments parseArguments(int argc, char**argv)
       exit(1);
     }
   Arguments args;
-
+    
   // host
   args.host = parseHost(argv);
-
+    
   // port
   args.port = parsePort(argv);
   // filename
   args.filename = (string) argv[3];
-
+    
   return args;
 }
 
@@ -283,18 +283,24 @@ void setupEnvironment(const int sockfd)
     }
 }
 
-int main(int argc, char **argv)
+int
+main(int argc, char **argv)
 {
   Arguments args = parseArguments(argc, argv);
-
+    
   // create a socket using UDP IP
   int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-
+    
   setupEnvironment(sockfd);
+
   struct sockaddr_in serverAddr = createServerAddr(args.port, args.host);
+
   struct sockaddr_in clientAddr = createClientAddr(sockfd);
+  
   connectionSetup(clientAddr);
+    
   communicate(sockfd, args.filename, serverAddr);
+
   close(sockfd);
 
   return 0;
