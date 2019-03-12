@@ -45,7 +45,7 @@ const int SYN_OFFSET = 1;
 const int FIN_MASK = 1;
 const int FLAG_POS = 11;
 
-int client_number = 0;
+int client_number = 1;
 
 struct Header
 {
@@ -79,7 +79,7 @@ void convertHeaderToByteArray(Header h, char header[HEADER_SIZE])
 
 uint32_t getValueFromBytes(char *h, int index)
 {
-  return (((h[index])<<NUM_RIGHT_OFFSET1)|((h[index+1])<<NUM_RIGHT_OFFSET2)|((h[index+2])<<NUM_RIGHT_OFFSET3)|(h[index+3]));
+  return ntohl(((h[index])<<NUM_RIGHT_OFFSET1)|((h[index+1])<<NUM_RIGHT_OFFSET2)|((h[index+2])<<NUM_RIGHT_OFFSET3)|(h[index+3]));
 }
 
 Header convertByteArrayToHeader(char *h)
@@ -89,9 +89,17 @@ Header convertByteArrayToHeader(char *h)
   res.SYNflag = h[FLAG_POS]&SYN_MASK;
   res.FINflag = h[FLAG_POS]&FIN_MASK;
 
-  res.sequenceNumber = getValueFromBytes(h,0);
-  res.acknowledgementNumber = getValueFromBytes(h,4);
-  res.connectionID = (getValueFromBytes(h,8)>>16)&~CONN_MASK;
+  memcpy(&res.sequenceNumber, (uint32_t *)h, sizeof(uint32_t));
+  memcpy(&res.acknowledgementNumber, (uint32_t *)&h[4], sizeof(uint32_t));
+  memcpy(&res.connectionID, (uint16_t *)&h[8], sizeof(uint16_t));
+
+  res.acknowledgementNumber = ntohl(res.acknowledgementNumber);
+  res.connectionID = ntohs(res.connectionID);
+  res.sequenceNumber = ntohl(res.sequenceNumber);
+
+  //res.sequenceNumber = getValueFromBytes(h,0);
+  //res.acknowledgementNumber = getValueFromBytes(h,4);
+  //res.connectionID = (getValueFromBytes(h,8)>>16)&~CONN_MASK;
   return res;
 }
 
@@ -226,12 +234,19 @@ string getFileName(string fileDir, int num)
 // creates the SYNACK for the 3-way handshake
 Header createSYNACK(Header clientSyn)
 {
-  return clientSyn;
+  Header serverSynAck;
+  serverSynAck.ACKflag = 1;
+  serverSynAck.connectionID = client_number;
+  serverSynAck.SYNflag = 1;
+  serverSynAck.FINflag = 0;
+  serverSynAck.sequenceNumber = 4321;
+  serverSynAck.acknowledgementNumber = clientSyn.sequenceNumber+1;
+  return serverSynAck;
 }
 
 bool beginNewConnection(Header packet)
 {
-  return packet.SYNflag&&!packet.ACKflag&&packet.FINflag;
+  return packet.SYNflag&&!packet.ACKflag&&!packet.FINflag;
 }
 
 void listenForPackets(int clientSockfd, string fileDir)
@@ -274,14 +289,19 @@ void listenForPackets(int clientSockfd, string fileDir)
         char header[HEADER_SIZE];
         memcpy(header, buf, HEADER_SIZE);
         Header packet_header = convertByteArrayToHeader(header);
-        for(int i = 0; i<12; i++)
+        Header response;
+        char responsePacket[HEADER_SIZE];
+
+        for(int i = 0; i<12; i+=4)
         {
-          cout<<(uint32_t)header[i]<<" ";
+          printInt_32((int32_t )header[i]);
         }
         // print details
         // if SYN then start 3 way handshake -> create new connection state
         if (beginNewConnection(packet_header))
         {
+          cout << "Create new connection!"<<endl;
+          response = createSYNACK(packet_header);
           client_number++;
         }
 
@@ -293,11 +313,32 @@ void listenForPackets(int clientSockfd, string fileDir)
         // if FIN update connection state
 
         cout <<endl;
-        cout << "Header contents: \n";
+        cout << "Header contents received: \n";
         cout<< "SEQ NO:"<<packet_header.sequenceNumber <<" ACK NO:"<<packet_header.acknowledgementNumber<<endl;
         cout <<"CONNECTION ID:"<<packet_header.connectionID<<endl;
         cout << "SYN:"<<packet_header.SYNflag <<" ACK:"<<packet_header.ACKflag << " FIN:"<<packet_header.FINflag<<endl;
-        fout.open(getFileName(fileDir,num), ios::out);
+        
+                cout <<endl;
+        cout << "Header contents to be sent: \n";
+        cout<< "SEQ NO:"<<response.sequenceNumber <<" ACK NO:"<<response.acknowledgementNumber<<endl;
+        cout <<"CONNECTION ID:"<<response.connectionID<<endl;
+        cout << "SYN:"<<response.SYNflag <<" ACK:"<<response.ACKflag << " FIN:"<<response.FINflag<<endl;
+
+        convertHeaderToByteArray(response,responsePacket);
+
+        for(int i = 0; i<12; i++)
+        {
+          cout<<(uint32_t)responsePacket[i]<<" ";
+        }
+        cout <<endl;
+
+        if (sendto(clientSockfd, responsePacket, HEADER_SIZE, 0, (const sockaddr *)&clientAddr, clientAddrSize) == -1)
+          {
+            printError("Unable to send data to server");
+            exitOnError(clientSockfd);
+          }
+
+        fout.open(getFileName(fileDir,client_number), ios::out);
         fout.write(buf+HEADER_SIZE, rec_res-HEADER_SIZE);//-HEADER_SIZE);+HEADER_SIZE
       }
       
@@ -331,7 +372,6 @@ void worker(int clientSockfd, int n, string fileDir)
 
 int main(int argc, char **argv)
 {
-  int client_number  = 1;
   Arguments args = parseArguments(argc, argv);
     
   signal(SIGTERM, sigHandler);
