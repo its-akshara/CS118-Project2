@@ -51,16 +51,6 @@ struct Header
   bool FINflag;
 };
 
-// // pass by reference
-// void updateArrayIndexToNumberBitwise(char header[HEADER_SIZE+1], int index, uint32_t number)
-// {
-//   uint32_t network_byte_order = htonl(number);
-//   header[index] = (NUM_MASK4)&(network_byte_order>>NUM_RIGHT_OFFSET1);
-//   header[index+1] = NUM_MASK4&(network_byte_order>>NUM_RIGHT_OFFSET2);
-//   header[index+2] = NUM_MASK4&(network_byte_order>>NUM_RIGHT_OFFSET3);
-//   header[index+3] = (NUM_MASK4&network_byte_order);
-// }
-
 int32_t getFlags(bool ACKflag, bool SYNflag, bool FINflag)
 {
   return ((ACKflag<<ACK_OFFSET))|((SYNflag<<SYN_OFFSET))|(FINflag);
@@ -72,12 +62,8 @@ void convertHeaderToByteArray(Header h, char header[HEADER_SIZE])
   memset(&header[0], 0, HEADER_SIZE);
   uint32_t seqNetwork = htonl(h.sequenceNumber);
   uint32_t ackNetwork = (htonl(h.acknowledgementNumber));
-  // updateArrayIndexToNumberBitwise(header,0,h.sequenceNumber);
-  // updateArrayIndexToNumberBitwise(header,4,h.acknowledgementNumber);
   //an int representing the third 'row' of the header
   uint16_t connNetwork = htons(h.connectionID);
-  // header[8] = (NUM_MASK4)&(connNetwork>>NUM_RIGHT_OFFSET3);
-  // header[9] = (NUM_MASK4)&(connNetwork);
   uint16_t ASFNetwork = htons(getFlags(h.ACKflag,h.SYNflag,h.FINflag));
   memcpy(header, (char *)&seqNetwork, sizeof(uint32_t));
   memcpy(header+4, (char *)&ackNetwork, sizeof(uint32_t));
@@ -89,7 +75,7 @@ void convertHeaderToByteArray(Header h, char header[HEADER_SIZE])
 
 uint32_t getValueFromBytes(char *h, int index)
 {
-  return (((h[index])<<NUM_RIGHT_OFFSET1)|((h[index+1])<<NUM_RIGHT_OFFSET2)|((h[index+2])<<NUM_RIGHT_OFFSET3)|(h[index+3]));
+  return ntohl(((h[index])<<NUM_RIGHT_OFFSET1)|((h[index+1])<<NUM_RIGHT_OFFSET2)|((h[index+2])<<NUM_RIGHT_OFFSET3)|(h[index+3]));
 }
 
 Header convertByteArrayToHeader(char *h)

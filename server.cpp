@@ -45,6 +45,8 @@ const int SYN_OFFSET = 1;
 const int FIN_MASK = 1;
 const int FLAG_POS = 11;
 
+int client_number = 0;
+
 struct Header
 {
   uint32_t sequenceNumber;
@@ -55,39 +57,32 @@ struct Header
   bool FINflag;
 };
 
-// pass by reference
-void updateArrayIndexToNumberBitwise(unsigned char header[HEADER_SIZE+1], int index, uint32_t number)
+int32_t getFlags(bool ACKflag, bool SYNflag, bool FINflag)
 {
-  uint32_t network_byte_order = (number);
-  header[index] = ((NUM_MASK1&network_byte_order)>>NUM_RIGHT_OFFSET1);
-  header[index+1] = ((NUM_MASK2&network_byte_order)>>NUM_RIGHT_OFFSET2);
-  header[index+2] = ((NUM_MASK3&network_byte_order)>>NUM_RIGHT_OFFSET3);
-  header[index+3] = (NUM_MASK4&network_byte_order);
-}
-
-int32_t getConnIDAndFlags(uint16_t connectionID,bool ACKflag, bool SYNflag, bool FINflag)
-{
-  return ((connectionID<<CONN_RIGHT_OFFSET)&CONN_MASK)|((ACKflag<<ACK_OFFSET)&ACK_MASK)|((SYNflag<<SYN_OFFSET)&SYN_MASK)|(FINflag&
-  FIN_MASK);
+  return ((ACKflag<<ACK_OFFSET))|((SYNflag<<SYN_OFFSET))|(FINflag);
 }
 
 // returns a 96 bit(12 byte) array representing the TCP header
-void convertHeaderToByteArray(Header h, unsigned char header[HEADER_SIZE])
+void convertHeaderToByteArray(Header h, char header[HEADER_SIZE])
 {
   memset(&header[0], 0, HEADER_SIZE);
-  updateArrayIndexToNumberBitwise(header,0,h.sequenceNumber);
-  updateArrayIndexToNumberBitwise(header,4,h.acknowledgementNumber);
+  uint32_t seqNetwork = htonl(h.sequenceNumber);
+  uint32_t ackNetwork = (htonl(h.acknowledgementNumber));
   //an int representing the third 'row' of the header
-  int32_t connIDASF = getConnIDAndFlags(h.connectionID,h.ACKflag,h.SYNflag,h.FINflag);
-  updateArrayIndexToNumberBitwise(header,8,connIDASF);
+  uint16_t connNetwork = htons(h.connectionID);
+  uint16_t ASFNetwork = htons(getFlags(h.ACKflag,h.SYNflag,h.FINflag));
+  memcpy(header, (char *)&seqNetwork, sizeof(uint32_t));
+  memcpy(header+4, (char *)&ackNetwork, sizeof(uint32_t));
+  memcpy(header+8, (char *)&connNetwork, sizeof(uint16_t));
+  memcpy(header+10, (char *)&ASFNetwork, sizeof(uint16_t));
 }
 
-uint32_t getValueFromBytes(unsigned char *h, int index)
+uint32_t getValueFromBytes(char *h, int index)
 {
   return (((h[index])<<NUM_RIGHT_OFFSET1)|((h[index+1])<<NUM_RIGHT_OFFSET2)|((h[index+2])<<NUM_RIGHT_OFFSET3)|(h[index+3]));
 }
 
-Header convertByteArrayToHeader(unsigned char *h)
+Header convertByteArrayToHeader(char *h)
 {
   Header res;
   res.ACKflag = h[FLAG_POS]&ACK_MASK;
@@ -166,8 +161,8 @@ void createDirIfNotExists(string path)
     {
       if(mkdir(path.c_str(), 0777)<0)
         {
-	  printError("Unable to create directory.");
-	  exit(1);
+	        printError("Unable to create directory.");
+	        exit(1);
         }
         
     }
@@ -228,13 +223,23 @@ string getFileName(string fileDir, int num)
   return fileDir +"/" + to_string(num) + ".file";
 }
 
+// creates the SYNACK for the 3-way handshake
+Header createSYNACK(Header clientSyn)
+{
+  
+}
+
+bool beginNewConnection(Header packet)
+{
+  
+}
+
 void listenForPackets(int clientSockfd, string fileDir)
 {
   // read/write data from/into the connection
   bool isEnd = false;
   char buf[PACKET_SIZE] = {0};
   fstream fout;
-  int num = 0;
     
   // fd_set readfds;
     
@@ -266,7 +271,7 @@ void listenForPackets(int clientSockfd, string fileDir)
       {
         cout<< "What was received:"<<buf<<endl;
         cout<<"Return value:"<<rec_res<<endl;
-        unsigned char header[HEADER_SIZE];
+        char header[HEADER_SIZE];
         memcpy(header, buf, HEADER_SIZE);
         Header packet_header = convertByteArrayToHeader(header);
         for(int i = 0; i<12; i++)
@@ -275,7 +280,12 @@ void listenForPackets(int clientSockfd, string fileDir)
         }
         // print details
         // if SYN then start 3 way handshake -> create new connection state
-        
+        if (beginNewConnection(packet_header))
+        {
+
+        }
+
+
         // send SYN ACK
 
         // if ACK
@@ -335,7 +345,7 @@ int main(int argc, char **argv)
    test.ACKflag = 1;
    test.FINflag = 1;
 
-  unsigned char blah[HEADER_SIZE];
+  char blah[HEADER_SIZE];
   convertHeaderToByteArray(test,blah);
   cout << "test header:"<<endl;
   for(int i = 0; i<12; i++)
