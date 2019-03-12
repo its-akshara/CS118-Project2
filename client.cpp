@@ -7,6 +7,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <unistd.h>
 
@@ -50,36 +51,45 @@ struct Header
   bool FINflag;
 };
 
-// pass by reference
-void updateArrayIndexToNumberBitwise(char header[HEADER_SIZE+1], int index, uint32_t number)
-{
-  uint32_t network_byte_order = htonl(number);
-  header[index] = ((NUM_MASK1&network_byte_order)>>NUM_RIGHT_OFFSET1);
-  header[index+1] = ((NUM_MASK2&network_byte_order)>>NUM_RIGHT_OFFSET2);
-  header[index+2] = ((NUM_MASK3&network_byte_order)>>NUM_RIGHT_OFFSET3);
-  header[index+3] = (NUM_MASK4&network_byte_order);
-}
+// // pass by reference
+// void updateArrayIndexToNumberBitwise(char header[HEADER_SIZE+1], int index, uint32_t number)
+// {
+//   uint32_t network_byte_order = htonl(number);
+//   header[index] = (NUM_MASK4)&(network_byte_order>>NUM_RIGHT_OFFSET1);
+//   header[index+1] = NUM_MASK4&(network_byte_order>>NUM_RIGHT_OFFSET2);
+//   header[index+2] = NUM_MASK4&(network_byte_order>>NUM_RIGHT_OFFSET3);
+//   header[index+3] = (NUM_MASK4&network_byte_order);
+// }
 
-int32_t getConnIDAndFlags(uint16_t connectionID,bool ACKflag, bool SYNflag, bool FINflag)
+int32_t getFlags(bool ACKflag, bool SYNflag, bool FINflag)
 {
-  return ((connectionID<<CONN_RIGHT_OFFSET)&CONN_MASK)|((ACKflag<<ACK_OFFSET)&ACK_MASK)|((SYNflag<<SYN_OFFSET)&SYN_MASK)|(FINflag&
-  FIN_MASK);
+  return ((ACKflag<<ACK_OFFSET))|((SYNflag<<SYN_OFFSET))|(FINflag);
 }
 
 // returns a 96 bit(12 byte) array representing the TCP header
 void convertHeaderToByteArray(Header h, char header[HEADER_SIZE])
 {
   memset(&header[0], 0, HEADER_SIZE);
-  updateArrayIndexToNumberBitwise(header,0,h.sequenceNumber);
-  updateArrayIndexToNumberBitwise(header,4,h.acknowledgementNumber);
+  uint32_t seqNetwork = htonl(h.sequenceNumber);
+  uint32_t ackNetwork = (htonl(h.acknowledgementNumber));
+  // updateArrayIndexToNumberBitwise(header,0,h.sequenceNumber);
+  // updateArrayIndexToNumberBitwise(header,4,h.acknowledgementNumber);
   //an int representing the third 'row' of the header
-  int32_t connIDASF = getConnIDAndFlags(h.connectionID,h.ACKflag,h.SYNflag,h.FINflag);
-  updateArrayIndexToNumberBitwise(header,8,connIDASF);
+  uint16_t connNetwork = htons(h.connectionID);
+  // header[8] = (NUM_MASK4)&(connNetwork>>NUM_RIGHT_OFFSET3);
+  // header[9] = (NUM_MASK4)&(connNetwork);
+  uint16_t ASFNetwork = htons(getFlags(h.ACKflag,h.SYNflag,h.FINflag));
+  memcpy(header, (char *)&seqNetwork, sizeof(uint32_t));
+  memcpy(header+4, (char *)&ackNetwork, sizeof(uint32_t));
+  memcpy(header+8, (char *)&connNetwork, sizeof(uint16_t));
+  memcpy(header+10, (char *)&ASFNetwork, sizeof(uint16_t));
+
+
 }
 
 uint32_t getValueFromBytes(char *h, int index)
 {
-  return ntohl(((h[index])<<NUM_RIGHT_OFFSET1)|((h[index+1])<<NUM_RIGHT_OFFSET2)|((h[index+2])<<NUM_RIGHT_OFFSET3)|(h[index+3]));
+  return (((h[index])<<NUM_RIGHT_OFFSET1)|((h[index+1])<<NUM_RIGHT_OFFSET2)|((h[index+2])<<NUM_RIGHT_OFFSET3)|(h[index+3]));
 }
 
 Header convertByteArrayToHeader(char *h)
@@ -183,30 +193,38 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
     else
       {
         Header temp;
-        temp.sequenceNumber = 123;
-        temp.acknowledgementNumber = 8;
+        temp.sequenceNumber = 12345;
+        temp.acknowledgementNumber = 0;
         temp.connectionID = 0;
         temp.ACKflag = 0;
         temp.SYNflag = 1;
         temp.FINflag = 0;
         char buf_send[HEADER_SIZE+fin.gcount()];
+        memset(&buf_send[0], 0, HEADER_SIZE+fin.gcount());
         char header[HEADER_SIZE];
         convertHeaderToByteArray(temp,header);
-        cout << header<<endl<<endl;
-        strcpy(buf_send,header);
-        strcat(buf_send,buf);
-
-        cout<< "Sending: ";
-        printf("%s\n",buf_send);
-        cout<<"HEADER:";
+        cout << "Header array: "<<header<<endl<<endl;
+        memcpy(buf_send,header,HEADER_SIZE);
+        cout<<"HEADER before append:";
         for(int i =0; i<12;i++)
         {
           cout<<(int32_t)header[i]<<" ";
 
         }
         cout<<endl;
+        memcpy(buf_send+12,buf, fin.gcount());
 
-        if (sendto(sockfd, buf, fin.gcount() + HEADER_SIZE, 0, (const sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
+        cout<< "Sending: ";
+        printf("%s\n",buf_send);
+        cout<<"HEADER:";
+        for(int i =0; i<12;i++)
+        {
+          cout<<(int32_t)buf_send[i]<<" ";
+
+        }
+        cout<<endl;
+
+        if (sendto(sockfd, buf_send, fin.gcount() + HEADER_SIZE, 0, (const sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
           {
             printError("Unable to send data to server");
             exitOnError(sockfd);

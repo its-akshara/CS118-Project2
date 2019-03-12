@@ -58,7 +58,7 @@ struct Header
 // pass by reference
 void updateArrayIndexToNumberBitwise(unsigned char header[HEADER_SIZE+1], int index, uint32_t number)
 {
-  uint32_t network_byte_order = htonl(number);
+  uint32_t network_byte_order = (number);
   header[index] = ((NUM_MASK1&network_byte_order)>>NUM_RIGHT_OFFSET1);
   header[index+1] = ((NUM_MASK2&network_byte_order)>>NUM_RIGHT_OFFSET2);
   header[index+2] = ((NUM_MASK3&network_byte_order)>>NUM_RIGHT_OFFSET3);
@@ -265,7 +265,7 @@ void listenForPackets(int clientSockfd, string fileDir)
       if(rec_res > 0)
       {
         cout<< "What was received:"<<buf<<endl;
-        cout<<"Return value"<<rec_res<<endl;
+        cout<<"Return value:"<<rec_res<<endl;
         unsigned char header[HEADER_SIZE];
         memcpy(header, buf, HEADER_SIZE);
         Header packet_header = convertByteArrayToHeader(header);
