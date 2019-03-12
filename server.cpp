@@ -29,16 +29,8 @@ const int MAX_CLIENT_NUMBER = 12;
 const int DATA_SIZE = 512;
 const int HEADER_SIZE = 12;
 const int PACKET_SIZE = HEADER_SIZE + DATA_SIZE;
+const int MAX_SEQACK = 102400;
 
-const int NUM_MASK1 = 0xff000000;
-const int NUM_MASK2 = 0x00ff0000;
-const int NUM_MASK3 = 0x0000ff00;
-const int NUM_MASK4 = 0x000000ff;
-const int NUM_RIGHT_OFFSET1=24;
-const int NUM_RIGHT_OFFSET2=16;
-const int NUM_RIGHT_OFFSET3=8;
-const long CONN_MASK =0xffff0000;
-const int CONN_RIGHT_OFFSET = 16;
 const int ACK_MASK = 4;
 const int ACK_OFFSET = 2;
 const int SYN_MASK = 2;
@@ -79,11 +71,6 @@ void convertHeaderToByteArray(Header h, char header[HEADER_SIZE])
   memcpy(header+10, (char *)&ASFNetwork, sizeof(uint16_t));
 }
 
-uint32_t getValueFromBytes(char *h, int index)
-{
-  return ntohl(((h[index])<<NUM_RIGHT_OFFSET1)|((h[index+1])<<NUM_RIGHT_OFFSET2)|((h[index+2])<<NUM_RIGHT_OFFSET3)|(h[index+3]));
-}
-
 Header convertByteArrayToHeader(char *h)
 {
   Header res;
@@ -99,9 +86,6 @@ Header convertByteArrayToHeader(char *h)
   res.connectionID = ntohs(res.connectionID);
   res.sequenceNumber = ntohl(res.sequenceNumber);
 
-  //res.sequenceNumber = getValueFromBytes(h,0);
-  //res.acknowledgementNumber = getValueFromBytes(h,4);
-  //res.connectionID = (getValueFromBytes(h,8)>>16)&~CONN_MASK;
   return res;
 }
 
@@ -282,6 +266,17 @@ Header createACKHandshake(Header client, uint32_t payloadSize)
     serverACK.acknowledgementNumber++;
   }
 
+  if(serverACK.acknowledgementNumber>MAX_SEQACK)
+  {
+    serverACK.acknowledgementNumber = 0;
+  }
+  if(serverACK.sequenceNumber>MAX_SEQACK)
+  {
+    serverACK.sequenceNumber = 0;
+    connToCumACK[client.connectionID] = 0;
+  }
+
+
   return serverACK;
 }
 
@@ -351,6 +346,18 @@ Header createFINACK(Header packet_header)
 
   serverFINACK.connectionID = packet_header.connectionID;
   serverFINACK.acknowledgementNumber = packet_header.sequenceNumber+1;
+
+  
+  if(serverFINACK.acknowledgementNumber>MAX_SEQACK)
+  {
+    serverFINACK.acknowledgementNumber = 0;
+  }
+  if(serverFINACK.sequenceNumber>MAX_SEQACK)
+  {
+    serverFINACK.sequenceNumber = 0;
+    connToCumACK[packet_header.connectionID] = 0;
+  }
+
   return serverFINACK; 
 }
 
