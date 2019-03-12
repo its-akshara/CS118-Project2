@@ -51,6 +51,16 @@ struct Header
   bool FINflag;
 };
 
+// // pass by reference
+// void updateArrayIndexToNumberBitwise(char header[HEADER_SIZE+1], int index, uint32_t number)
+// {
+//   uint32_t network_byte_order = htonl(number);
+//   header[index] = (NUM_MASK4)&(network_byte_order>>NUM_RIGHT_OFFSET1);
+//   header[index+1] = NUM_MASK4&(network_byte_order>>NUM_RIGHT_OFFSET2);
+//   header[index+2] = NUM_MASK4&(network_byte_order>>NUM_RIGHT_OFFSET3);
+//   header[index+3] = (NUM_MASK4&network_clibyte_order);
+// }
+
 int32_t getFlags(bool ACKflag, bool SYNflag, bool FINflag)
 {
   return ((ACKflag<<ACK_OFFSET))|((SYNflag<<SYN_OFFSET))|(FINflag);
@@ -62,8 +72,12 @@ void convertHeaderToByteArray(Header h, char header[HEADER_SIZE])
   memset(&header[0], 0, HEADER_SIZE);
   uint32_t seqNetwork = htonl(h.sequenceNumber);
   uint32_t ackNetwork = (htonl(h.acknowledgementNumber));
+  // updateArrayIndexToNumberBitwise(header,0,h.sequenceNumber);
+  // updateArrayIndexToNumberBitwise(header,4,h.acknowledgementNumber);
   //an int representing the third 'row' of the header
   uint16_t connNetwork = htons(h.connectionID);
+  // header[8] = (NUM_MASK4)&(connNetwork>>NUM_RIGHT_OFFSET3);
+  // header[9] = (NUM_MASK4)&(connNetwork);
   uint16_t ASFNetwork = htons(getFlags(h.ACKflag,h.SYNflag,h.FINflag));
   memcpy(header, (char *)&seqNetwork, sizeof(uint32_t));
   memcpy(header+4, (char *)&ackNetwork, sizeof(uint32_t));
@@ -75,7 +89,7 @@ void convertHeaderToByteArray(Header h, char header[HEADER_SIZE])
 
 uint32_t getValueFromBytes(char *h, int index)
 {
-  return ntohl(((h[index])<<NUM_RIGHT_OFFSET1)|((h[index+1])<<NUM_RIGHT_OFFSET2)|((h[index+2])<<NUM_RIGHT_OFFSET3)|(h[index+3]));
+  return (((h[index])<<NUM_RIGHT_OFFSET1)|((h[index+1])<<NUM_RIGHT_OFFSET2)|((h[index+2])<<NUM_RIGHT_OFFSET3)|(h[index+3]));
 }
 
 Header convertByteArrayToHeader(char *h)
@@ -149,23 +163,23 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
   fstream fin;
   fin.open(filename, ios::in);
   char buf[PACKET_SIZE] = {0};
-    
+
   fd_set writefds;
-    
+
   struct timeval timeout;
   timeout.tv_sec = 10;
   timeout.tv_usec = 0;
-    
+
   do {
     fin.read(buf, DATA_SIZE);
-        
+
     FD_CLR(sockfd,&writefds);
     FD_ZERO(&writefds);
     FD_SET(sockfd, &writefds);
-        
-        
+
+
     int sel_res = select(sockfd+1,NULL,&writefds,NULL,&timeout);
-        
+
     if(sel_res == -1)
       {
 	      printError("select() failed.");
@@ -185,28 +199,28 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
         temp.ACKflag = 0;
         temp.SYNflag = 1;
         temp.FINflag = 0;
+
+        //do 3 way handshake
+
         char buf_send[HEADER_SIZE+fin.gcount()];
         memset(&buf_send[0], 0, HEADER_SIZE+fin.gcount());
         char header[HEADER_SIZE];
         convertHeaderToByteArray(temp,header);
-        cout << "Header array: "<<header<<endl<<endl;
         memcpy(buf_send,header,HEADER_SIZE);
-        cout<<"HEADER before append:";
+      /*cout<<"HEADER before append:";
         for(int i =0; i<12;i++)
         {
           cout<<(int32_t)header[i]<<" ";
 
         }
-        cout<<endl;
+        cout<<endl; */
         memcpy(buf_send+12,buf, fin.gcount());
 
-        cout<< "Sending: ";
         printf("%s\n",buf_send);
         cout<<"HEADER:";
         for(int i =0; i<12;i++)
         {
           cout<<(int32_t)buf_send[i]<<" ";
-
         }
         cout<<endl;
 
@@ -221,6 +235,50 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
 
   } while (!fin.eof());
   fin.close();
+
+  //fin stuff
+  socklen_t serverAddrSize = sizeof(serverAddr);
+
+  //send UDP pkt with FIN flag//////////////////////////////////////////////////
+  Header findata;
+  findata.sequenceNumber = 8; //test value
+  findata.acknowledgementNumber = 4; //test value
+  findata.connectionID = 1; //test value
+  findata.ACKflag = 0;
+  findata.SYNflag = 0;
+  findata.FINflag = 1;
+
+  char finheader[HEADER_SIZE];
+  convertHeaderToByteArray(findata,finheader);
+cout<<"FIN HEADER:";
+  for(int i =0; i<12;i++)
+  {
+    cout<<(int32_t)finheader[i]<<" ";
+  }
+  cout<<endl;
+
+  if (sendto(sockfd, finheader, fin.gcount() + HEADER_SIZE, 0, (const sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
+    {
+      printError("Unable to send data to server");
+      exitOnError(sockfd);
+    }
+char recbuf[HEADER_SIZE] = {0};
+memset(recbuf, '\0', sizeof(recbuf));
+  //Expect pkt with ACK flag////////////////////////////////////////////////////
+socklen_t recint = recvfrom(sockfd, recbuf, HEADER_SIZE, 0, (struct sockaddr *)&serverAddr, &serverAddrSize);
+if (recint >0)
+    {
+      cout<< "What was received:"<<recbuf<<endl;
+      //check for fin-ack flag
+    }
+    else
+    {
+        cout<<"error";
+    }
+  //wait 2 secs for pkt with FIN flag (FIN-WAIT)////////////////////////////////
+
+  //Respond to each incoming FIN with an ACK pk/////////////////////////////////
+
 }
 
 long parsePort(char **argv)
@@ -238,7 +296,7 @@ string parseHost(char **argv)
 {
   struct addrinfo hints, *info;
   hints.ai_family = AF_INET;
-    
+
   if(getaddrinfo(argv[1], NULL,&hints,&info))
     {
       printError("Host name is invalid.");
@@ -247,7 +305,7 @@ string parseHost(char **argv)
     }
   char addrbuf[INET_ADDRSTRLEN + 1];
   const char *addr = inet_ntop(info->ai_family, &(((struct sockaddr_in *)info->ai_addr)->sin_addr),addrbuf,sizeof(addrbuf));
-    
+
   return (string)addr;
 }
 
@@ -260,15 +318,15 @@ Arguments parseArguments(int argc, char**argv)
       exit(1);
     }
   Arguments args;
-    
+
   // host
   args.host = parseHost(argv);
-    
+
   // port
   args.port = parsePort(argv);
   // filename
   args.filename = (string) argv[3];
-    
+
   return args;
 }
 
@@ -291,18 +349,18 @@ int
 main(int argc, char **argv)
 {
   Arguments args = parseArguments(argc, argv);
-    
+
   // create a socket using UDP IP
   int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    
+
   setupEnvironment(sockfd);
 
   struct sockaddr_in serverAddr = createServerAddr(args.port, args.host);
 
   struct sockaddr_in clientAddr = createClientAddr(sockfd);
-  
+
   connectionSetup(clientAddr);
-    
+
   communicate(sockfd, args.filename, serverAddr);
 
   close(sockfd);
