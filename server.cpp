@@ -150,7 +150,7 @@ void exitOnError(int sockfd)
 void createDirIfNotExists(string path)
 {
   struct stat s;
-    
+
   if(!(stat(path.c_str(), &s) == 0 &&S_ISDIR(s.st_mode)))
     {
       if(mkdir(path.c_str(), 0777)<0)
@@ -158,7 +158,7 @@ void createDirIfNotExists(string path)
 	        printError("Unable to create directory.");
 	        exit(1);
         }
-        
+
     }
 }
 
@@ -171,14 +171,14 @@ Arguments parseArguments(int argc, char**argv)
       exit(1);
     }
   Arguments args;
-    
+
   // port
   args.port = parsePort(argv);
-    
+
   // directory
   createDirIfNotExists(string(argv[2]));
   args.fileDir = (string) argv[2];
-    
+
   return args;
 }
 
@@ -255,7 +255,7 @@ Header createACKHandshake(Header client, uint32_t payloadSize)
     serverACK.sequenceNumber = client.acknowledgementNumber;
     connToCumACK[client.connectionID] = client.acknowledgementNumber;
   }
-    
+
 
   if(payloadSize>0)
   {
@@ -315,9 +315,9 @@ void printPacketDetails(Header packet_header, msgType type, bool dup=false)
     cout<<"RECV ";
   else
     cout<<"SEND ";
-  
+
   cout<<packet_header.sequenceNumber<<" "<<packet_header.acknowledgementNumber<<" "<<packet_header.connectionID;
-  
+
   if(packet_header.ACKflag)
     cout<<" "<<"ACK";
   if(packet_header.SYNflag)
@@ -326,7 +326,7 @@ void printPacketDetails(Header packet_header, msgType type, bool dup=false)
     cout<<" "<<"FIN";
   if(type==SEND && dup)
     cout<<" DUP";
-  
+
   cout<<endl;
 }
 
@@ -347,7 +347,7 @@ Header createFINACK(Header packet_header)
   serverFINACK.connectionID = packet_header.connectionID;
   serverFINACK.acknowledgementNumber = packet_header.sequenceNumber+1;
 
-  
+
   if(serverFINACK.acknowledgementNumber>MAX_SEQACK)
   {
     serverFINACK.acknowledgementNumber = 0;
@@ -358,7 +358,7 @@ Header createFINACK(Header packet_header)
     connToCumACK[packet_header.connectionID] = 0;
   }
 
-  return serverFINACK; 
+  return serverFINACK;
 }
 
 void listenForPackets(int clientSockfd, string fileDir)
@@ -367,19 +367,19 @@ void listenForPackets(int clientSockfd, string fileDir)
   bool isEnd = false;
   bool dup = false;
   char buf[PACKET_SIZE] = {0};
-    
+
   // fd_set readfds;
-    
+
   struct timeval timeout;
   timeout.tv_sec = 15;
   timeout.tv_usec = 0;
-    
+
   while (!isEnd)
     {
       memset(buf, '\0', sizeof(buf));
       struct sockaddr_in clientAddr;
       socklen_t clientAddrSize = sizeof(clientAddr);
-      
+
       int rec_res = recvfrom(clientSockfd, buf, PACKET_SIZE, 0, (struct sockaddr *)&clientAddr,&clientAddrSize);
 
       timeout.tv_sec = 10;
@@ -391,7 +391,7 @@ void listenForPackets(int clientSockfd, string fileDir)
         }
       else if(!rec_res)
         {
-	        break;
+          break;
         }
       if(rec_res > 0)
       {
@@ -400,7 +400,7 @@ void listenForPackets(int clientSockfd, string fileDir)
         Header packet_header = convertByteArrayToHeader(header);
         Header response;
         char responsePacket[HEADER_SIZE];
-        
+
         // print details
         printPacketDetails(packet_header,RECV);
 
@@ -434,7 +434,7 @@ void listenForPackets(int clientSockfd, string fileDir)
           printPacketDetails(response,SEND,dup);
         }
       }
-      
+
     }
 }
 
@@ -465,7 +465,7 @@ void worker(int clientSockfd, int n, string fileDir)
 int main(int argc, char **argv)
 {
   Arguments args = parseArguments(argc, argv);
-    
+
   signal(SIGTERM, sigHandler);
   signal(SIGQUIT, sigHandler);
 
@@ -480,18 +480,17 @@ int main(int argc, char **argv)
 
   setReuse(sockfd);
   setupEnvironment(sockfd);
-    
+
   struct sockaddr_in addr = createServerAddr(sockfd, args.port);
-    
+
   bindSocket(sockfd, addr);
-    
+
   // set socket to listen status
   while (true)
     {
-      worker(sockfd,client_number,args.fileDir);      
+      worker(sockfd,client_number,args.fileDir);
     }
   close(sockfd);
-    
+
   return 0;
 }
-
