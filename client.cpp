@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <unistd.h>
+#include <poll.h>
 
 #include <iostream>
 #include <sstream>
@@ -69,8 +70,6 @@ void convertHeaderToByteArray(Header h, char header[HEADER_SIZE])
   memcpy(header+4, (char *)&ackNetwork, sizeof(uint32_t));
   memcpy(header+8, (char *)&connNetwork, sizeof(uint16_t));
   memcpy(header+10, (char *)&ASFNetwork, sizeof(uint16_t));
-
-
 }
 
 uint32_t getValueFromBytes(char *h, int index)
@@ -85,9 +84,14 @@ Header convertByteArrayToHeader(char *h)
   res.SYNflag = h[FLAG_POS]&SYN_MASK;
   res.FINflag = h[FLAG_POS]&FIN_MASK;
 
-  res.sequenceNumber = getValueFromBytes(h,0);
-  res.acknowledgementNumber = getValueFromBytes(h,4);
-  res.connectionID = (getValueFromBytes(h,8)>>16)&~CONN_MASK;
+  memcpy(&res.sequenceNumber, (uint32_t *)h, sizeof(uint32_t));
+  memcpy(&res.acknowledgementNumber, (uint32_t *)&h[4], sizeof(uint32_t));
+  memcpy(&res.connectionID, (uint16_t *)&h[8], sizeof(uint16_t));
+
+  res.acknowledgementNumber = ntohl(res.acknowledgementNumber);
+  res.connectionID = ntohs(res.connectionID);
+  res.sequenceNumber = ntohl(res.sequenceNumber);
+
   return res;
 }
 
@@ -149,23 +153,118 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
   fstream fin;
   fin.open(filename, ios::in);
   char buf[PACKET_SIZE] = {0};
-    
+
+  //------------ SYN Handshaking ------------//
+  uint16_t connexID = 0;
+
+  Header clientSYN;
+  clientSYN.sequenceNumber = 12345;
+  clientSYN.acknowledgementNumber = 0;
+  clientSYN.connectionID = connexID;
+  clientSYN.ACKflag = 0;
+  clientSYN.SYNflag = 1;
+  clientSYN.FINflag = 0;
+
+  char c_SYN[HEADER_SIZE] = {0}; //holds SYN to send to server
+  convertHeaderToByteArray(clientSYN, c_SYN);
+
+  int rec_res;
+  char c_SYNACK[HEADER_SIZE] = {0}; // holds SYN ACK received from server
+  Header serverSYNACK;
+
+  socklen_t serverAddrLen = sizeof(serverAddr);
+
+  //Polling
+  bool receivedSYNACK = false;
+
+  struct pollfd fds;
+  int timeout_msecs = 500;
+  bool isSYN_DUP = false;
+
+  fds.fd = sockfd;
+  fds.events = POLLIN;
+
+
+  while (!receivedSYNACK)
+  {
+    //--- Send SYN ---//
+    if (sendto(sockfd, c_SYN, HEADER_SIZE, 0, (const sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
+    {
+      printError("Unable to send SYN header to server");
+      exitOnError(sockfd);
+    }
+    cout << "SEND " << clientSYN.sequenceNumber << " " << clientSYN.acknowledgementNumber << " " << clientSYN.connectionID << " " /*<CWND> <SS-THRESH>*/ << "SYN";
+    if (isSYN_DUP)
+      cout << " DUP" << endl;
+    else
+      cout << endl;
+    //----------------//
+
+    //--- Wait for SYN ACK ---//
+    poll(&fds, 1, timeout_msecs);
+    if (fds.revents != 0)         // An event on sockfd has occurred.
+    {
+      rec_res = recvfrom(sockfd, c_SYNACK, HEADER_SIZE, 0, (struct sockaddr *)&serverAddr,&serverAddrLen);
+      if (rec_res == -1)
+      {
+        printError("Error in receiving SYN ACK from server");
+        exitOnError(sockfd);
+      }
+      if(rec_res > 0)
+      {
+          serverSYNACK = convertByteArrayToHeader(c_SYNACK);
+          if (serverSYNACK.ACKflag && serverSYNACK.SYNflag && !serverSYNACK.FINflag)
+          {
+              receivedSYNACK = true;
+              connexID = serverSYNACK.connectionID;
+              cout << "RECV " << serverSYNACK.sequenceNumber << " " << serverSYNACK.acknowledgementNumber << " " << serverSYNACK.connectionID << " " /*<CWND> <SS-THRESH>*/ << "ACK SYN" << endl;
+              break;
+          }
+      }
+    }
+    //-----------------------//
+
+    isSYN_DUP = true;
+  }
+
+  //--- Send ACK for SYN ACK ---//
+  Header clientSYNACK_ACK;
+  clientSYNACK_ACK.sequenceNumber = 12345;
+  clientSYNACK_ACK.acknowledgementNumber = 0;
+  clientSYNACK_ACK.connectionID = connexID;
+  clientSYNACK_ACK.ACKflag = 1;
+  clientSYNACK_ACK.SYNflag = 0;
+  clientSYNACK_ACK.FINflag = 0;
+
+  char c_SYNACK_ACK[HEADER_SIZE] = {0}; //holds SYN to send to server
+  convertHeaderToByteArray(clientSYNACK_ACK, c_SYNACK_ACK);
+
+  if (sendto(sockfd, c_SYNACK_ACK, HEADER_SIZE, 0, (const sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
+  {
+    printError("Unable to send ACK for SYN ACK to server");
+    exitOnError(sockfd);
+  }
+  cout << "SEND " << clientSYNACK_ACK.sequenceNumber << " " << clientSYNACK_ACK.acknowledgementNumber << " " << clientSYNACK_ACK.connectionID << " " /*<CWND> <SS-THRESH>*/ << "ACK" << endl;
+  //----------------------------//
+
+  //-----------------------------------------//
+
   fd_set writefds;
-    
+
   struct timeval timeout;
   timeout.tv_sec = 10;
   timeout.tv_usec = 0;
-    
+
   do {
     fin.read(buf, DATA_SIZE);
-        
+
     FD_CLR(sockfd,&writefds);
     FD_ZERO(&writefds);
     FD_SET(sockfd, &writefds);
-        
-        
+
+
     int sel_res = select(sockfd+1,NULL,&writefds,NULL,&timeout);
-        
+
     if(sel_res == -1)
       {
 	      printError("select() failed.");
@@ -181,7 +280,7 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
         Header temp;
         temp.sequenceNumber = 12345;
         temp.acknowledgementNumber = 0;
-        temp.connectionID = 0;
+        temp.connectionID = connexID;
         temp.ACKflag = 0;
         temp.SYNflag = 1;
         temp.FINflag = 0;
@@ -195,7 +294,6 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
         for(int i =0; i<12;i++)
         {
           cout<<(int32_t)header[i]<<" ";
-
         }
         cout<<endl;
         memcpy(buf_send+12,buf, fin.gcount());
@@ -215,12 +313,14 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
             printError("Unable to send data to server");
             exitOnError(sockfd);
           }
+        cout << "SEND " << temp.sequenceNumber << " " << temp.acknowledgementNumber << " " << temp.connectionID << " " /*<CWND> <SS-THRESH>*/ << "ACK" << endl;
         timeout.tv_sec = 10;
         timeout.tv_usec = 0;
       }
 
   } while (!fin.eof());
   fin.close();
+
 }
 
 long parsePort(char **argv)
@@ -238,7 +338,7 @@ string parseHost(char **argv)
 {
   struct addrinfo hints, *info;
   hints.ai_family = AF_INET;
-    
+
   if(getaddrinfo(argv[1], NULL,&hints,&info))
     {
       printError("Host name is invalid.");
@@ -247,7 +347,7 @@ string parseHost(char **argv)
     }
   char addrbuf[INET_ADDRSTRLEN + 1];
   const char *addr = inet_ntop(info->ai_family, &(((struct sockaddr_in *)info->ai_addr)->sin_addr),addrbuf,sizeof(addrbuf));
-    
+
   return (string)addr;
 }
 
@@ -260,15 +360,15 @@ Arguments parseArguments(int argc, char**argv)
       exit(1);
     }
   Arguments args;
-    
+
   // host
   args.host = parseHost(argv);
-    
+
   // port
   args.port = parsePort(argv);
   // filename
   args.filename = (string) argv[3];
-    
+
   return args;
 }
 
@@ -291,18 +391,18 @@ int
 main(int argc, char **argv)
 {
   Arguments args = parseArguments(argc, argv);
-    
+
   // create a socket using UDP IP
   int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    
+
   setupEnvironment(sockfd);
 
   struct sockaddr_in serverAddr = createServerAddr(args.port, args.host);
 
   struct sockaddr_in clientAddr = createClientAddr(sockfd);
-  
+
   connectionSetup(clientAddr);
-    
+
   communicate(sockfd, args.filename, serverAddr);
 
   close(sockfd);
