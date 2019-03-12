@@ -13,6 +13,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <unordered_map>
 #include <iomanip>
 #include <cstdint>
 #include <iostream>
@@ -46,6 +47,7 @@ const int FIN_MASK = 1;
 const int FLAG_POS = 11;
 
 int client_number = 1;
+unordered_map<int,int> connToCumACK;
 
 struct Header
 {
@@ -206,6 +208,12 @@ void setReuse(const int sockfd)
   }
 }
 
+bool hasNoFlags(Header packet_header)
+{
+  return !packet_header.FINflag&&!packet_header.ACKflag&&!packet_header.SYNflag;
+}
+
+
 struct sockaddr_in createServerAddr(const int sockfd, const int port)
 {
   // bind address to socket
@@ -252,20 +260,41 @@ Header createACKHandshake(Header client, uint32_t payloadSize)
   serverACK.ACKflag = 1;
 
   serverACK.connectionID = client.connectionID;
-  serverACK.acknowledgementNumber = client.sequenceNumber + ((payloadSize>0)?payloadSize:1);
-  serverACK.sequenceNumber = client.acknowledgementNumber;
-    cout <<"Within end of handshake, ACKNum:"<<serverACK.acknowledgementNumber<<endl;
-    cout <<"Client seq:"<<client.sequenceNumber<<endl;
-    cout <<"Payload size: "<<payloadSize<<endl;
+  serverACK.acknowledgementNumber = client.sequenceNumber;
+
+  if(hasNoFlags(client))
+  {
+    serverACK.sequenceNumber = connToCumACK[client.connectionID];
+  }
+  else
+  {
+    serverACK.sequenceNumber = client.acknowledgementNumber;
+    connToCumACK[client.connectionID] = client.acknowledgementNumber;
+  }
+    
+
+  if(payloadSize>0)
+  {
+    serverACK.acknowledgementNumber+=payloadSize;
+  }
+  else if(client.SYNflag)
+  {
+    serverACK.acknowledgementNumber++;
+  }
+
+  cout <<"Within end of handshake, ACKNum:"<<serverACK.acknowledgementNumber<<endl;
+  cout <<"Client seq:"<<client.sequenceNumber<<endl;
+  cout <<"Payload size: "<<payloadSize<<endl;
+  cout<<"Cum ACK:"<<connToCumACK[client.connectionID]<<endl;
   return serverACK;
 }
 
 bool beginNewConnection(Header packet)
 {
-  return packet.SYNflag&&!packet.ACKflag&&!packet.FINflag;
+  return packet.SYNflag&&!packet.ACKflag&&!packet.FINflag&&(packet.connectionID==0);
 }
 
-bool receivedACKWithPayload(Header packet)
+bool receivedACK(Header packet)
 {
   return packet.ACKflag&&!packet.FINflag&&!packet.SYNflag;
 }
@@ -286,11 +315,6 @@ void writePayloadToFile(int num, string fileDir, char * payload, int size)
   fout.close();
 }
 
-bool hasNoFlags(Header packet_header)
-{
-  return !packet_header.FINflag&&!packet_header.ACKflag&&!packet_header.SYNflag;
-}
-
 void printReceivedPacketDetails(Header packet_header)
 {
   cout<<"RECV "<<packet_header.sequenceNumber<<" "<<packet_header.acknowledgementNumber<<" "<<packet_header.connectionID;
@@ -303,12 +327,30 @@ void printReceivedPacketDetails(Header packet_header)
   cout<<endl;
 }
 
+bool receivedFIN(Header packet_header)
+{
+  return !packet_header.SYNflag&&packet_header.FINflag&&!packet_header.ACKflag;
+}
+
+Header createFINACK(Header packet_header)
+{
+  Header serverFINACK;
+  serverFINACK.ACKflag = 1;
+  serverFINACK.SYNflag = 0;
+  serverFINACK.FINflag = 1;
+
+  serverFINACK.sequenceNumber = connToCumACK[packet_header.connectionID];
+
+  serverFINACK.connectionID = packet_header.connectionID;
+  serverFINACK.acknowledgementNumber = packet_header.sequenceNumber+1;
+  return serverFINACK; 
+}
+
 void listenForPackets(int clientSockfd, string fileDir)
 {
   // read/write data from/into the connection
   bool isEnd = false;
   char buf[PACKET_SIZE] = {0};
-  // fstream fout;
     
   // fd_set readfds;
     
@@ -361,12 +403,17 @@ void listenForPackets(int clientSockfd, string fileDir)
           createNewFile(client_number,fileDir);
           client_number++;
         }
-        else if(receivedACKWithPayload(packet_header)||hasNoFlags(packet_header))
+        else if(receivedACK(packet_header)||hasNoFlags(packet_header))
         {
           response = createACKHandshake(packet_header, rec_res-HEADER_SIZE);
           // write to file
           writePayloadToFile(packet_header.connectionID,fileDir,buf+HEADER_SIZE, rec_res-HEADER_SIZE);
+         // connToCumACK[packet_header.connectionID] = packet_header.acknowledgementNumber;//connToCumACK[packet_header.connectionID] + rec_res-HEADER_SIZE;
           cout <<endl<<"Received ACK with Payload"<<endl;
+        }
+        else if(receivedFIN(packet_header))
+        {
+          response = createFINACK(packet_header);
         }
         
 
@@ -392,7 +439,7 @@ void listenForPackets(int clientSockfd, string fileDir)
         }
         cout <<endl<<endl;
 
-        if (sendto(clientSockfd, responsePacket, HEADER_SIZE, 0, (const sockaddr *)&clientAddr, clientAddrSize) == -1)
+        if (!receivedACK(packet_header) && sendto(clientSockfd, responsePacket, HEADER_SIZE, 0, (const sockaddr *)&clientAddr, clientAddrSize) == -1)
           {
             printError("Unable to send data to server");
             exitOnError(clientSockfd);
