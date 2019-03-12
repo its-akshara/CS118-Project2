@@ -51,6 +51,8 @@ struct Header
   bool FINflag;
 };
 
+enum msgType{RECV,SEND,DROP};
+
 // // pass by reference
 // void updateArrayIndexToNumberBitwise(char header[HEADER_SIZE+1], int index, uint32_t number)
 // {
@@ -157,6 +159,29 @@ void connectionSetup(const struct sockaddr_in clientAddr)
   inet_ntop(clientAddr.sin_family, &clientAddr.sin_addr, ipstr, sizeof(ipstr));
 }
 
+void printPacketDetails(Header packet_header, msgType type, bool dup=false)
+{
+  if(type==DROP)
+    cout<<"DROP ";
+  else if(type==RECV)
+    cout<<"RECV ";
+  else
+    cout<<"SEND ";
+
+  cout<<packet_header.sequenceNumber<<" "<<packet_header.acknowledgementNumber<<" "<<packet_header.connectionID;
+
+  if(packet_header.ACKflag)
+    cout<<" "<<"ACK";
+  if(packet_header.SYNflag)
+    cout<<" "<<"SYN";
+  if(packet_header.FINflag)
+    cout<<" "<<"FIN";
+  if(type==SEND && dup)
+    cout<<" DUP";
+
+  cout<<endl;
+}
+
 void communicate(const int sockfd, const string filename, struct sockaddr_in serverAddr)
 {
   // send/receive data to/from connection
@@ -207,13 +232,6 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
         char header[HEADER_SIZE];
         convertHeaderToByteArray(temp,header);
         memcpy(buf_send,header,HEADER_SIZE);
-      /*cout<<"HEADER before append:";
-        for(int i =0; i<12;i++)
-        {
-          cout<<(int32_t)header[i]<<" ";
-
-        }
-        cout<<endl; */
         memcpy(buf_send+12,buf, fin.gcount());
 
         printf("%s\n",buf_send);
@@ -233,52 +251,92 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
         timeout.tv_usec = 0;
       }
 
+
   } while (!fin.eof());
   fin.close();
 
   //fin stuff
-  socklen_t serverAddrSize = sizeof(serverAddr);
 
-  //send UDP pkt with FIN flag//////////////////////////////////////////////////
-  Header findata;
-  findata.sequenceNumber = 8; //test value
-  findata.acknowledgementNumber = 4; //test value
-  findata.connectionID = 1; //test value
-  findata.ACKflag = 0;
-  findata.SYNflag = 0;
-  findata.FINflag = 1;
+    // read/write data from/into the connection
+    bool isEnd = false;
+    bool dup = false;
 
-  char finheader[HEADER_SIZE];
-  convertHeaderToByteArray(findata,finheader);
-cout<<"FIN HEADER:";
-  for(int i =0; i<12;i++)
-  {
-    cout<<(int32_t)finheader[i]<<" ";
-  }
-  cout<<endl;
+    while (!isEnd)
+      {
+        memset(buf, '\0', sizeof(buf));
+        socklen_t serverAddrSize = sizeof(serverAddr);
 
-  if (sendto(sockfd, finheader, fin.gcount() + HEADER_SIZE, 0, (const sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
-    {
-      printError("Unable to send data to server");
-      exitOnError(sockfd);
-    }
-char recbuf[HEADER_SIZE] = {0};
-memset(recbuf, '\0', sizeof(recbuf));
-  //Expect pkt with ACK flag////////////////////////////////////////////////////
-socklen_t recint = recvfrom(sockfd, recbuf, HEADER_SIZE, 0, (struct sockaddr *)&serverAddr, &serverAddrSize);
-if (recint >0)
-    {
-      cout<< "What was received:"<<recbuf<<endl;
-      //check for fin-ack flag
-    }
-    else
-    {
-        cout<<"error";
-    }
-  //wait 2 secs for pkt with FIN flag (FIN-WAIT)////////////////////////////////
+        int rec_res = recvfrom(sockfd, buf, HEADER_SIZE, 0, (struct sockaddr *)&serverAddr, &serverAddrSize);
 
-  //Respond to each incoming FIN with an ACK pk/////////////////////////////////
+        timeout.tv_sec = 10;
+        timeout.tv_usec = 0;
+        if (rec_res == -1 && errno!=EWOULDBLOCK)
+          {
+  	        printError("Error in receiving data");
+            exitOnError(sockfd);
+          }
+        else if(!rec_res)
+          {
+  	        break;
+          }
+        if(rec_res > 0)
+        {
+          char header[HEADER_SIZE];
+          memcpy(header, buf, HEADER_SIZE);
+          Header packet_header = convertByteArrayToHeader(header);
+          Header response;
+          char responsePacket[HEADER_SIZE];
+          cout <<endl;
+          cout << "Header contents received: \n";
+          cout<< "SEQ:"<<packet_header.sequenceNumber <<" ACK:"<<packet_header.acknowledgementNumber<<endl;
+          cout <<"CONN ID:"<<packet_header.connectionID<<endl;
+          cout << "SYN:"<<packet_header.SYNflag <<" ACK:"<<packet_header.ACKflag << " FIN:"<<packet_header.FINflag<<endl;
 
+          cout <<endl;
+
+        //send UDP pkt with FIN flag//////////////////////////////////////////////////
+        //temporary placeholder header struct with FIN data
+        Header findata;
+        findata.sequenceNumber = packet_header.sequenceNumber;
+        findata.acknowledgementNumber = packet_header.acknowledgementNumber;
+        findata.connectionID = packet_header.connectionID; //test value
+        findata.ACKflag = 0;
+        findata.SYNflag = 0;
+        findata.FINflag = 1;
+        //char array of fin header
+        char finheader[HEADER_SIZE];
+        convertHeaderToByteArray(findata,finheader);
+        //send the fin header to server
+        socklen_t serverAddrSize = sizeof(serverAddr);
+        if (sendto(sockfd, finheader, fin.gcount() + HEADER_SIZE, 0, (const sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
+          {
+            printError("Unable to send data to server");
+            exitOnError(sockfd);
+          }
+          cout << "\n...FIN SENT TO SERVER...\n";
+
+          //Expect pkt with FIN ACK flag////////////////////////////////////////////////////
+          if (!packet_header.SYNflag&&packet_header.FINflag&&packet_header.ACKflag) //check for fin-ack flag
+          {
+            cout << "\nreceived FIN ACK\n";
+            cout << "\n wait 2 secs for pkt with fin\n";
+            cout << "\n close connection \n";
+            return;
+            //wait 2 secs for pkt with FIN flag (FIN-WAIT)////////////////////////////////
+            //Respond to each incoming FIN with an ACK pkt////////////////////////////////
+          }
+        }
+      }
+      cout<< "What was received:"<<buf<<endl;
+      Header packet_header = convertByteArrayToHeader(buf);
+      //print out header
+      cout <<endl;
+      cout << "Header contents received: \n";
+      cout<< "SEQ:"<<packet_header.sequenceNumber <<" ACK:"<<packet_header.acknowledgementNumber<<endl;
+      cout <<"CONN ID:"<<packet_header.connectionID<<endl;
+      cout << "SYN:"<<packet_header.SYNflag <<" ACK:"<<packet_header.ACKflag << " FIN:"<<packet_header.FINflag<<endl;
+
+      cout <<endl;
 }
 
 long parsePort(char **argv)
