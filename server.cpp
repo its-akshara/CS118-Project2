@@ -244,9 +244,63 @@ Header createSYNACK(Header clientSyn)
   return serverSynAck;
 }
 
+Header createACKHandshake(Header client, uint32_t payloadSize)
+{
+  Header serverACK;
+  serverACK.SYNflag = 0;
+  serverACK.FINflag = 0;
+  serverACK.ACKflag = 1;
+
+  serverACK.connectionID = client.connectionID;
+  serverACK.acknowledgementNumber = client.sequenceNumber + ((payloadSize>0)?payloadSize:1);
+  serverACK.sequenceNumber = client.acknowledgementNumber;
+    cout <<"Within end of handshake, ACKNum:"<<serverACK.acknowledgementNumber<<endl;
+    cout <<"Client seq:"<<client.sequenceNumber<<endl;
+    cout <<"Payload size: "<<payloadSize<<endl;
+  return serverACK;
+}
+
 bool beginNewConnection(Header packet)
 {
   return packet.SYNflag&&!packet.ACKflag&&!packet.FINflag;
+}
+
+bool receivedACKWithPayload(Header packet)
+{
+  return packet.ACKflag&&!packet.FINflag&&!packet.SYNflag;
+}
+
+void createNewFile(int num, string fileDir)
+{
+  fstream fout;
+  fout.open(getFileName(fileDir,num), ios::out);
+  fout.close();
+}
+
+void writePayloadToFile(int num, string fileDir, char * payload, int size)
+{
+  fstream fout;
+  fout.open(getFileName(fileDir,num), ios::app);
+  cout <<"Payload to be written:"<<payload<<endl;
+  fout.write(payload, size);
+  fout.close();
+}
+
+bool hasNoFlags(Header packet_header)
+{
+  return !packet_header.FINflag&&!packet_header.ACKflag&&!packet_header.SYNflag;
+}
+
+void printReceivedPacketDetails(Header packet_header)
+{
+  cout<<"RECV "<<packet_header.sequenceNumber<<" "<<packet_header.acknowledgementNumber<<" "<<packet_header.connectionID;
+  if(packet_header.ACKflag)
+    cout<<" "<<"ACK";
+  if(packet_header.SYNflag)
+    cout<<" "<<"SYN";
+  if(packet_header.FINflag)
+    cout<<" "<<"FIN";
+  cout<<endl;
 }
 
 void listenForPackets(int clientSockfd, string fileDir)
@@ -254,7 +308,7 @@ void listenForPackets(int clientSockfd, string fileDir)
   // read/write data from/into the connection
   bool isEnd = false;
   char buf[PACKET_SIZE] = {0};
-  fstream fout;
+  // fstream fout;
     
   // fd_set readfds;
     
@@ -275,7 +329,6 @@ void listenForPackets(int clientSockfd, string fileDir)
       if (rec_res == -1 && errno!=EWOULDBLOCK)
         {
 	        printError("Error in receiving data");
-          fout.close();
           exitOnError(clientSockfd);
         }
       else if(!rec_res)
@@ -292,23 +345,30 @@ void listenForPackets(int clientSockfd, string fileDir)
         Header response;
         char responsePacket[HEADER_SIZE];
 
-        for(int i = 0; i<12; i+=4)
+        for(int i = 0; i<12; i+=1)
         {
-          printInt_32((int32_t )header[i]);
+          cout<< ((int32_t )header[i]) << " ";
         }
+        cout<<endl;
+        
         // print details
+        printReceivedPacketDetails(packet_header);
+
         // if SYN then start 3 way handshake -> create new connection state
         if (beginNewConnection(packet_header))
         {
-          cout << "Create new connection!"<<endl;
           response = createSYNACK(packet_header);
+          createNewFile(client_number,fileDir);
           client_number++;
         }
-
-
-        // send SYN ACK
-
-        // if ACK
+        else if(receivedACKWithPayload(packet_header)||hasNoFlags(packet_header))
+        {
+          response = createACKHandshake(packet_header, rec_res-HEADER_SIZE);
+          // write to file
+          writePayloadToFile(packet_header.connectionID,fileDir,buf+HEADER_SIZE, rec_res-HEADER_SIZE);
+          cout <<endl<<"Received ACK with Payload"<<endl;
+        }
+        
 
         // if FIN update connection state
 
@@ -322,7 +382,7 @@ void listenForPackets(int clientSockfd, string fileDir)
         cout << "Header contents to be sent: \n";
         cout<< "SEQ NO:"<<response.sequenceNumber <<" ACK NO:"<<response.acknowledgementNumber<<endl;
         cout <<"CONNECTION ID:"<<response.connectionID<<endl;
-        cout << "SYN:"<<response.SYNflag <<" ACK:"<<response.ACKflag << " FIN:"<<response.FINflag<<endl;
+        cout << "SYN:"<<response.SYNflag <<" ACK:"<<response.ACKflag << " FIN:"<<response.FINflag<<endl<<endl;
 
         convertHeaderToByteArray(response,responsePacket);
 
@@ -330,7 +390,7 @@ void listenForPackets(int clientSockfd, string fileDir)
         {
           cout<<(uint32_t)responsePacket[i]<<" ";
         }
-        cout <<endl;
+        cout <<endl<<endl;
 
         if (sendto(clientSockfd, responsePacket, HEADER_SIZE, 0, (const sockaddr *)&clientAddr, clientAddrSize) == -1)
           {
@@ -338,12 +398,12 @@ void listenForPackets(int clientSockfd, string fileDir)
             exitOnError(clientSockfd);
           }
 
-        fout.open(getFileName(fileDir,client_number), ios::out);
-        fout.write(buf+HEADER_SIZE, rec_res-HEADER_SIZE);//-HEADER_SIZE);+HEADER_SIZE
+        // fout.open(getFileName(fileDir,client_number), ios::out);
+        // fout.write(buf+HEADER_SIZE, rec_res-HEADER_SIZE);//-HEADER_SIZE);+HEADER_SIZE
       }
       
     }
-  fout.close();
+  // fout.close();
 }
 
 void setupEnvironment(const int sockfd)
@@ -377,29 +437,6 @@ int main(int argc, char **argv)
   signal(SIGTERM, sigHandler);
   signal(SIGQUIT, sigHandler);
 
-   Header test;
-   test.connectionID = 3;
-   test.acknowledgementNumber = 777;
-   test.sequenceNumber = 99;
-   test.SYNflag = 1;
-   test.ACKflag = 1;
-   test.FINflag = 1;
-
-  char blah[HEADER_SIZE];
-  convertHeaderToByteArray(test,blah);
-  cout << "test header:"<<endl;
-  for(int i = 0; i<12; i++)
-  {
-    cout<<(uint32_t)blah[i]<<" ";
-  }
-  cout <<endl;
-
-  Header back  = convertByteArrayToHeader(blah);
-
-  cout<< "Convert back"<<endl;
-  cout <<back.sequenceNumber<<" "<<back.acknowledgementNumber<<" "<<back.connectionID<<" "<<endl;
-
-  
   // create a socket using UDP IP
   int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 
