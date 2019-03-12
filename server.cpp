@@ -226,12 +226,12 @@ string getFileName(string fileDir, int num)
 // creates the SYNACK for the 3-way handshake
 Header createSYNACK(Header clientSyn)
 {
-  
+  return clientSyn;
 }
 
 bool beginNewConnection(Header packet)
 {
-  
+  return packet.SYNflag&&!packet.ACKflag&&packet.FINflag;
 }
 
 void listenForPackets(int clientSockfd, string fileDir)
@@ -282,7 +282,7 @@ void listenForPackets(int clientSockfd, string fileDir)
         // if SYN then start 3 way handshake -> create new connection state
         if (beginNewConnection(packet_header))
         {
-
+          client_number++;
         }
 
 
