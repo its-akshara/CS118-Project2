@@ -234,7 +234,6 @@ Header createSYNACK(Header clientSyn)
   serverSynAck.FINflag = 0;
   serverSynAck.sequenceNumber = 4321;
   serverSynAck.acknowledgementNumber = clientSyn.sequenceNumber+1;
-  // connToNextExpectedSeq[serverSynAck.connectionID] = serverSynAck.acknowledgementNumber;
   return serverSynAck;
 }
 
@@ -245,21 +244,8 @@ bool beginNewConnection(Header packet)
 
 bool outOfOrder(Header packet_header)
 {
-  return !beginNewConnection(packet_header)&&connToLastInOrderACKSent[packet_header.connectionID].acknowledgementNumber != packet_header.sequenceNumber;// connToNextExpectedSeq[packet_header.connectionID]!=packet_header.sequenceNumber;
+  return !beginNewConnection(packet_header)&&connToLastInOrderACKSent[packet_header.connectionID].acknowledgementNumber != packet_header.sequenceNumber;
 }
-
-// Header createDUPACK(uint16_t connectionID)
-// {
-//   Header ack;
-//   ack.SYNflag = 0;
-//   ack.FINflag = 0;
-//   ack.ACKflag = 1;
-//   ack.connectionID = connectionID;
-//   ack.
-
-
-//   return ack;
-// }
 
 Header createACKHandshake(Header client, uint32_t payloadSize)
 {
@@ -394,12 +380,6 @@ void listenForPackets(int clientSockfd, string fileDir)
   bool dup = false;
   char buf[PACKET_SIZE] = {0};
 
-  // fd_set readfds;
-
-  // struct timeval timeout;
-  // timeout.tv_sec = 15;
-  // timeout.tv_usec = 0;
-
   while (!isEnd)
     {
       memset(buf, '\0', sizeof(buf));
@@ -409,8 +389,6 @@ void listenForPackets(int clientSockfd, string fileDir)
 
       int rec_res = recvfrom(clientSockfd, buf, PACKET_SIZE, 0, (struct sockaddr *)&clientAddr,&clientAddrSize);
 
-      // timeout.tv_sec = 10;
-      // timeout.tv_usec = 0;
       if (rec_res == -1 && errno!=EWOULDBLOCK)
         {
 	        printError("Error in receiving data");
@@ -501,9 +479,7 @@ void setupEnvironment(const int sockfd)
 void worker(int clientSockfd, int n, string fileDir)
 {
   setupEnvironment(clientSockfd);
-  // set up handshake
   listenForPackets(clientSockfd, fileDir);
-  // end handshake
   close(clientSockfd);
 }
 
