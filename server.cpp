@@ -101,16 +101,6 @@ void printUsage()
   cerr<< "USAGE: ./server <PORT> <FILE-DIR>\n";
 }
 
-void printInt_32(uint32_t x)
-{
-    cout << setfill('0') << setw(8) << hex << x << '\n';
-}
-
-void printInt_16(uint16_t x)
-{
-    cout << setfill('0') << setw(4) << hex << x << '\n';
-}
-
 void printError(string message)
 {
   cerr<<"ERROR: ";
@@ -277,7 +267,7 @@ Header createACKHandshake(Header client, uint32_t payloadSize)
 
   if(serverACK.acknowledgementNumber>MAX_SEQACK)
   {
-    serverACK.acknowledgementNumber = serverACK.acknowledgementNumber% (MAX_SEQACK + 1);
+    serverACK.acknowledgementNumber = serverACK.acknowledgementNumber% (MAX_SEQACK + 1) + payloadSize;
   }
   if(serverACK.sequenceNumber>MAX_SEQACK)
   {
@@ -407,20 +397,21 @@ void listenForPackets(int clientSockfd, string fileDir)
         char responsePacket[HEADER_SIZE];
 
         // print details
-        if(outOfOrder(packet_header))
-        {
-          response = connToLastInOrderACKSent[packet_header.connectionID];
-          dup = true;
-        }
-        else if(!isValidPacket(packet_header))
+        if(!isValidPacket(packet_header))
         {
           printPacketDetails(packet_header,DROP);
           continue;
         }
-
-        printPacketDetails(packet_header,RECV);
+        else if(outOfOrder(packet_header))
+        {
+          response = connToLastInOrderACKSent[packet_header.connectionID];
+          dup = true;
+          printPacketDetails(packet_header,DROP);
+        }
+        else{
         if(!outOfOrder(packet_header))
         {
+          printPacketDetails(packet_header,RECV);
           // if SYN then start 3 way handshake -> create new connection state
           if (beginNewConnection(packet_header))
           {
@@ -455,6 +446,7 @@ void listenForPackets(int clientSockfd, string fileDir)
             exitOnError(clientSockfd);
           }
           printPacketDetails(response,SEND,dup);
+        }
         }
       }
 
