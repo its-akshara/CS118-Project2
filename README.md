@@ -40,6 +40,8 @@ Akshara Sundararajan, 404731846
 
 We use an object called Header, and created functions to convert the byte array version of the header to an struct Header and vice versa.
 
+We have 2 unordered_maps that store the values of the most recently sent ACK for an in order packet and the next expected sequence number from the client. The key is the connection ID.
+
 The workflow is as follows:
 - parseArguments() parses passed in arguments into an Arguments object, does correctness checking.
 - Set up UDP connection by calling socket(), setReuse().
@@ -48,7 +50,8 @@ The workflow is as follows:
   - listenForPackets(): Contains main logic of the server. Divided into the following parts:
     - Receive data over UDP socket
       - Parse the header into a Header object.
-        - Check for validity of packet (does it need to be dropped)
+        - Check for validity of packet (does it need to be dropped, is it in order)
+        - If its not in order send the most recent ACK for the most recent in order packet received
 	  - printPacketDetails() displays required information on output.
 	    - Find out what kind of packet it is, create response accordingly
 	        - If it is forming a new connection, create a SYN-ACK response, create new file and update checker for number of active connections
@@ -61,5 +64,7 @@ The workflow is as follows:
 ## Problems we ran into
 
 ## Additional libraries used
+
+
 
 ## Acknowledgements/Resources used

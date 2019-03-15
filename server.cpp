@@ -278,7 +278,6 @@ Header createACKHandshake(Header client, uint32_t payloadSize)
   else
   {
     serverACK.sequenceNumber = client.acknowledgementNumber;
-    // connToNextExpectedSeq[client.connectionID] = client.acknowledgementNumber;
   }
 
   if(payloadSize>0)
@@ -297,7 +296,6 @@ Header createACKHandshake(Header client, uint32_t payloadSize)
   if(serverACK.sequenceNumber>MAX_SEQACK)
   {
     serverACK.sequenceNumber = serverACK.sequenceNumber% (MAX_SEQACK + 1);
-    // connToNextExpectedSeq[client.connectionID] = serverACK.sequenceNumber;
   }
 
 
@@ -361,7 +359,7 @@ Header createFINACK(Header packet_header)
   serverFINACK.SYNflag = 0;
   serverFINACK.FINflag = 1;
 
-  serverFINACK.sequenceNumber = connToNextExpectedSeq[packet_header.connectionID];
+  serverFINACK.sequenceNumber = connToLastInOrderACKSent[packet_header.connectionID].sequenceNumber;
 
   serverFINACK.connectionID = packet_header.connectionID;
   serverFINACK.acknowledgementNumber = packet_header.sequenceNumber+1;
@@ -374,15 +372,19 @@ Header createFINACK(Header packet_header)
   if(serverFINACK.sequenceNumber>MAX_SEQACK)
   {
     serverFINACK.sequenceNumber = serverFINACK.sequenceNumber % (MAX_SEQACK + 1);
-    connToNextExpectedSeq[packet_header.connectionID] = serverFINACK.acknowledgementNumber;
   }
 
   return serverFINACK;
 }
 
+bool isValidConnectionStart(Header packet_header)
+{
+  return (beginNewConnection(packet_header)&&packet_header.acknowledgementNumber == 0 && packet_header.sequenceNumber == 12345);
+}
+
 bool isValidPacket(Header packet_header)
 {
-  return (packet_header.connectionID<client_number) && (packet_header.connectionID>=0)&&(packet_header.sequenceNumber<=MAX_SEQACK)&&(packet_header.acknowledgementNumber<=MAX_SEQACK);
+  return ((packet_header.connectionID<client_number) && (packet_header.connectionID>0)&&(packet_header.sequenceNumber<=MAX_SEQACK)&&(packet_header.acknowledgementNumber<=MAX_SEQACK))|| isValidConnectionStart(packet_header);
 }
 
 void listenForPackets(int clientSockfd, string fileDir)
@@ -461,6 +463,8 @@ void listenForPackets(int clientSockfd, string fileDir)
           else if(receivedFIN(packet_header))
           {
             response = createFINACK(packet_header);
+            connToLastInOrderACKSent[packet_header.connectionID] = response;
+            connToNextExpectedSeq[packet_header.connectionID] = response.acknowledgementNumber;
           }
         }
         convertHeaderToByteArray(response,responsePacket);
