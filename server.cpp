@@ -40,6 +40,7 @@ const int FLAG_POS = 11;
 
 int client_number = 1;
 unordered_map<int,int> connToCumACK;
+unordered_map<int,int> connToExpectedSeqNum;
 
 struct Header
 {
@@ -268,12 +269,12 @@ Header createACKHandshake(Header client, uint32_t payloadSize)
 
   if(serverACK.acknowledgementNumber>MAX_SEQACK)
   {
-    serverACK.acknowledgementNumber = 0;
+    serverACK.acknowledgementNumber = serverACK.acknowledgementNumber-MAX_SEQACK;
   }
   if(serverACK.sequenceNumber>MAX_SEQACK)
   {
-    serverACK.sequenceNumber = 0;
-    connToCumACK[client.connectionID] = 0;
+    serverACK.sequenceNumber = serverACK.sequenceNumber-MAX_SEQACK;
+    connToCumACK[client.connectionID] = serverACK.sequenceNumber;
   }
 
 
@@ -350,15 +351,20 @@ Header createFINACK(Header packet_header)
 
   if(serverFINACK.acknowledgementNumber>MAX_SEQACK)
   {
-    serverFINACK.acknowledgementNumber = 0;
+    serverFINACK.acknowledgementNumber = serverFINACK.acknowledgementNumber-MAX_SEQACK;
   }
   if(serverFINACK.sequenceNumber>MAX_SEQACK)
   {
-    serverFINACK.sequenceNumber = 0;
-    connToCumACK[packet_header.connectionID] = 0;
+    serverFINACK.sequenceNumber = serverFINACK.sequenceNumber-MAX_SEQACK;
+    connToCumACK[packet_header.connectionID] = serverFINACK.sequenceNumber;
   }
 
   return serverFINACK;
+}
+
+bool isValidPacket(Header packet_header)
+{
+  return (packet_header.connectionID<client_number && packet_header.connectionID>0)&&(packet_header.sequenceNumber=MAX_INPUT)&&(packet_header.acknowledgementNumber<=MAX_INPUT);
 }
 
 void listenForPackets(int clientSockfd, string fileDir)
@@ -402,6 +408,12 @@ void listenForPackets(int clientSockfd, string fileDir)
         char responsePacket[HEADER_SIZE];
 
         // print details
+        if(!isValidPacket(packet_header))
+        {
+          printPacketDetails(packet_header,DROP);
+          continue;
+        }
+
         printPacketDetails(packet_header,RECV);
 
         // if SYN then start 3 way handshake -> create new connection state

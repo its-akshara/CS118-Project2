@@ -324,15 +324,44 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
 
   //fin stuff
 
+  //1. send UDP pkt with FIN flag//////////////////////////////////////////////////
+  Header findata;
+  findata.sequenceNumber = packet_header.sequenceNumber;
+  findata.acknowledgementNumber = packet_header.acknowledgementNumber;
+  findata.connectionID = packet_header.connectionID; //test value
+  findata.ACKflag = 0;
+  findata.SYNflag = 0;
+  findata.FINflag = 1;
+  cout <<endl;
+  cout << "Header contents set to fin data: \n";
+  cout<< "SEQ:"<<packet_header.sequenceNumber <<" ACK:"<<packet_header.acknowledgementNumber<<endl;
+  cout <<"CONN ID:"<<packet_header.connectionID<<endl;
+  cout << "SYN:"<<packet_header.SYNflag <<" ACK:"<<packet_header.ACKflag << " FIN:"<<packet_header.FINflag<<endl;
+
+  cout <<endl;
+  //char array of fin header
+  char finheader[HEADER_SIZE];
+  convertHeaderToByteArray(findata,finheader);
+  //send the fin header to server
+  socklen_t serverAddrSize = sizeof(serverAddr);
+  if (sendto(sockfd, finheader, fin.gcount() + HEADER_SIZE, 0, (const sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
+    {
+      printError("Unable to send data to server");
+      exitOnError(sockfd);
+    }
+    cout << "\n...FIN SENT TO SERVER...\n";
+
     // read/write data from/into the connection
     bool isEnd = false;
     bool dup = false;
+    int loopnum = 0;
 
     while (!isEnd)
       {
         memset(buf, '\0', sizeof(buf));
         socklen_t serverAddrSize = sizeof(serverAddr);
 
+        //wait for server to send fin-ack
         int rec_res = recvfrom(sockfd, buf, HEADER_SIZE, 0, (struct sockaddr *)&serverAddr, &serverAddrSize);
 
         timeout.tv_sec = 10;
@@ -348,46 +377,19 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
           }
         if(rec_res > 0)
         {
+          //data received
           char header[HEADER_SIZE];
           memcpy(header, buf, HEADER_SIZE);
           Header packet_header = convertByteArrayToHeader(header);
           Header response;
           char responsePacket[HEADER_SIZE];
           cout <<endl;
-          cout << "Header contents received: \n";
+          cout << "Header contents of loop " << loopnum << " received: \n";
           cout<< "SEQ:"<<packet_header.sequenceNumber <<" ACK:"<<packet_header.acknowledgementNumber<<endl;
           cout <<"CONN ID:"<<packet_header.connectionID<<endl;
           cout << "SYN:"<<packet_header.SYNflag <<" ACK:"<<packet_header.ACKflag << " FIN:"<<packet_header.FINflag<<endl;
 
           cout <<endl;
-
-        //send UDP pkt with FIN flag//////////////////////////////////////////////////
-        //temporary placeholder header struct with FIN data
-        Header findata;
-        findata.sequenceNumber = packet_header.sequenceNumber;
-        findata.acknowledgementNumber = packet_header.acknowledgementNumber;
-        findata.connectionID = packet_header.connectionID; //test value
-        findata.ACKflag = 0;
-        findata.SYNflag = 0;
-        findata.FINflag = 1;
-        cout <<endl;
-        cout << "Header contents set to fin data: \n";
-        cout<< "SEQ:"<<packet_header.sequenceNumber <<" ACK:"<<packet_header.acknowledgementNumber<<endl;
-        cout <<"CONN ID:"<<packet_header.connectionID<<endl;
-        cout << "SYN:"<<packet_header.SYNflag <<" ACK:"<<packet_header.ACKflag << " FIN:"<<packet_header.FINflag<<endl;
-
-        cout <<endl;
-        //char array of fin header
-        char finheader[HEADER_SIZE];
-        convertHeaderToByteArray(findata,finheader);
-        //send the fin header to server
-        socklen_t serverAddrSize = sizeof(serverAddr);
-        if (sendto(sockfd, finheader, fin.gcount() + HEADER_SIZE, 0, (const sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
-          {
-            printError("Unable to send data to server");
-            exitOnError(sockfd);
-          }
-          cout << "\n...FIN SENT TO SERVER...\n";
 
           //Expect pkt with FIN ACK flag////////////////////////////////////////////////////
           if (!packet_header.SYNflag&&packet_header.FINflag&&packet_header.ACKflag) //check for fin-ack flag
