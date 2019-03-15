@@ -38,9 +38,6 @@ const int SYN_OFFSET = 1;
 const int FIN_MASK = 1;
 const int FLAG_POS = 11;
 
-int client_number = 1;
-unordered_map<int,int> connToCumACK;
-
 struct Header
 {
   uint32_t sequenceNumber;
@@ -50,6 +47,10 @@ struct Header
   bool SYNflag;
   bool FINflag;
 };
+
+int client_number = 1;
+unordered_map<uint16_t,uint32_t> connToNextExpectedSeq;
+unordered_map<uint16_t,Header> connToLastInOrderACKSent;
 
 int32_t getFlags(bool ACKflag, bool SYNflag, bool FINflag)
 {
@@ -236,6 +237,16 @@ Header createSYNACK(Header clientSyn)
   return serverSynAck;
 }
 
+bool beginNewConnection(Header packet)
+{
+  return packet.SYNflag&&!packet.ACKflag&&!packet.FINflag&&(packet.connectionID==0);
+}
+
+bool outOfOrder(Header packet_header)
+{
+  return !beginNewConnection(packet_header)&&connToLastInOrderACKSent[packet_header.connectionID].acknowledgementNumber != packet_header.sequenceNumber;
+}
+
 Header createACKHandshake(Header client, uint32_t payloadSize)
 {
   Header serverACK;
@@ -248,14 +259,12 @@ Header createACKHandshake(Header client, uint32_t payloadSize)
 
   if(hasNoFlags(client))
   {
-    serverACK.sequenceNumber = connToCumACK[client.connectionID];
+    serverACK.sequenceNumber = connToLastInOrderACKSent[client.connectionID].sequenceNumber;
   }
   else
   {
     serverACK.sequenceNumber = client.acknowledgementNumber;
-    connToCumACK[client.connectionID] = client.acknowledgementNumber;
   }
-
 
   if(payloadSize>0)
   {
@@ -268,21 +277,15 @@ Header createACKHandshake(Header client, uint32_t payloadSize)
 
   if(serverACK.acknowledgementNumber>MAX_SEQACK)
   {
-    serverACK.acknowledgementNumber = 0;
+    serverACK.acknowledgementNumber = serverACK.acknowledgementNumber% (MAX_SEQACK + 1);
   }
   if(serverACK.sequenceNumber>MAX_SEQACK)
   {
-    serverACK.sequenceNumber = 0;
-    connToCumACK[client.connectionID] = 0;
+    serverACK.sequenceNumber = serverACK.sequenceNumber% (MAX_SEQACK + 1);
   }
 
 
   return serverACK;
-}
-
-bool beginNewConnection(Header packet)
-{
-  return packet.SYNflag&&!packet.ACKflag&&!packet.FINflag&&(packet.connectionID==0);
 }
 
 bool receivedACK(Header packet)
@@ -342,7 +345,7 @@ Header createFINACK(Header packet_header)
   serverFINACK.SYNflag = 0;
   serverFINACK.FINflag = 1;
 
-  serverFINACK.sequenceNumber = connToCumACK[packet_header.connectionID];
+  serverFINACK.sequenceNumber = connToLastInOrderACKSent[packet_header.connectionID].sequenceNumber;
 
   serverFINACK.connectionID = packet_header.connectionID;
   serverFINACK.acknowledgementNumber = packet_header.sequenceNumber+1;
@@ -350,15 +353,24 @@ Header createFINACK(Header packet_header)
 
   if(serverFINACK.acknowledgementNumber>MAX_SEQACK)
   {
-    serverFINACK.acknowledgementNumber = 0;
+    serverFINACK.acknowledgementNumber = serverFINACK.acknowledgementNumber % (MAX_SEQACK + 1);
   }
   if(serverFINACK.sequenceNumber>MAX_SEQACK)
   {
-    serverFINACK.sequenceNumber = 0;
-    connToCumACK[packet_header.connectionID] = 0;
+    serverFINACK.sequenceNumber = serverFINACK.sequenceNumber % (MAX_SEQACK + 1);
   }
 
   return serverFINACK;
+}
+
+bool isValidConnectionStart(Header packet_header)
+{
+  return (beginNewConnection(packet_header)&&packet_header.acknowledgementNumber == 0 && packet_header.sequenceNumber == 12345);
+}
+
+bool isValidPacket(Header packet_header)
+{
+  return ((packet_header.connectionID<client_number) && (packet_header.connectionID>0)&&(packet_header.sequenceNumber<=MAX_SEQACK)&&(packet_header.acknowledgementNumber<=MAX_SEQACK))|| isValidConnectionStart(packet_header);
 }
 
 void listenForPackets(int clientSockfd, string fileDir)
@@ -368,22 +380,15 @@ void listenForPackets(int clientSockfd, string fileDir)
   bool dup = false;
   char buf[PACKET_SIZE] = {0};
 
-  // fd_set readfds;
-
-  struct timeval timeout;
-  timeout.tv_sec = 15;
-  timeout.tv_usec = 0;
-
   while (!isEnd)
     {
       memset(buf, '\0', sizeof(buf));
       struct sockaddr_in clientAddr;
       socklen_t clientAddrSize = sizeof(clientAddr);
+      dup = false;
 
       int rec_res = recvfrom(clientSockfd, buf, PACKET_SIZE, 0, (struct sockaddr *)&clientAddr,&clientAddrSize);
 
-      timeout.tv_sec = 10;
-      timeout.tv_usec = 0;
       if (rec_res == -1 && errno!=EWOULDBLOCK)
         {
 	        printError("Error in receiving data");
@@ -402,26 +407,44 @@ void listenForPackets(int clientSockfd, string fileDir)
         char responsePacket[HEADER_SIZE];
 
         // print details
+        if(outOfOrder(packet_header))
+        {
+          response = connToLastInOrderACKSent[packet_header.connectionID];
+          dup = true;
+        }
+        else if(!isValidPacket(packet_header))
+        {
+          printPacketDetails(packet_header,DROP);
+          continue;
+        }
+
         printPacketDetails(packet_header,RECV);
-
-        // if SYN then start 3 way handshake -> create new connection state
-        if (beginNewConnection(packet_header))
+        if(!outOfOrder(packet_header))
         {
-          response = createSYNACK(packet_header);
-          createNewFile(client_number,fileDir);
-          client_number++;
+          // if SYN then start 3 way handshake -> create new connection state
+          if (beginNewConnection(packet_header))
+          {
+            response = createSYNACK(packet_header);
+            connToNextExpectedSeq[response.connectionID] = response.acknowledgementNumber;
+            connToLastInOrderACKSent[response.connectionID] = response;
+            createNewFile(client_number,fileDir);
+            client_number++;
+          }
+          else if((receivedACK(packet_header)||hasNoFlags(packet_header)))
+          {
+            response = createACKHandshake(packet_header, rec_res-HEADER_SIZE);
+            connToLastInOrderACKSent[packet_header.connectionID] = response;
+            connToNextExpectedSeq[packet_header.connectionID] = response.acknowledgementNumber;
+            // write to file
+            writePayloadToFile(packet_header.connectionID,fileDir,buf+HEADER_SIZE, rec_res-HEADER_SIZE);
+          }
+          else if(receivedFIN(packet_header))
+          {
+            response = createFINACK(packet_header);
+            connToLastInOrderACKSent[packet_header.connectionID] = response;
+            connToNextExpectedSeq[packet_header.connectionID] = response.acknowledgementNumber;
+          }
         }
-        else if(receivedACK(packet_header)||hasNoFlags(packet_header))
-        {
-          response = createACKHandshake(packet_header, rec_res-HEADER_SIZE);
-          // write to file
-          writePayloadToFile(packet_header.connectionID,fileDir,buf+HEADER_SIZE, rec_res-HEADER_SIZE);
-        }
-        else if(receivedFIN(packet_header))
-        {
-          response = createFINACK(packet_header);
-        }
-
         convertHeaderToByteArray(response,responsePacket);
 
         if(!receivedACK(packet_header))
@@ -456,9 +479,7 @@ void setupEnvironment(const int sockfd)
 void worker(int clientSockfd, int n, string fileDir)
 {
   setupEnvironment(clientSockfd);
-  // set up handshake
   listenForPackets(clientSockfd, fileDir);
-  // end handshake
   close(clientSockfd);
 }
 

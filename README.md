@@ -31,7 +31,40 @@ To dissect tcpdump-recorded file, you can use `-r <pcapfile>` option. For exampl
 
     wireshark -X lua_script:./confundo.lua -r confundo.pcap
 
-## Names of Contributers   
+## Names of Contributers
 Arpi Beshlikyan, 404239449
 Melissa Cox, 704800126
 Akshara Sundararajan, 404731846
+
+## Design of Server
+
+We use an object called Header, and created functions to convert the byte array version of the header to an struct Header and vice versa.
+
+We have 2 unordered_maps that store the values of the most recently sent ACK for an in order packet and the next expected sequence number from the client. The key is the connection ID.
+
+The workflow is as follows:
+- parseArguments() parses passed in arguments into an Arguments object, does correctness checking.
+- Set up UDP connection by calling socket(), setReuse().
+  - Needed to create server address and bind socket
+  - The worker() functions sets up the environment (setupEnvironment()), then call listenForPackets() which accepts all incoming packets. Finally it closes the socket.
+  - listenForPackets(): Contains main logic of the server. Divided into the following parts:
+    - Receive data over UDP socket
+      - Parse the header into a Header object.
+        - Check for validity of packet (does it need to be dropped, is it in order)
+        - If its not in order send the most recent ACK for the most recent in order packet received
+	  - printPacketDetails() displays required information on output.
+	    - Find out what kind of packet it is, create response accordingly
+	        - If it is forming a new connection, create a SYN-ACK response, create new file and update checker for number of active connections
+		    - Check if it is an ACK/has no flags, create ACK response, write payload to file if it contains a payload
+		        - If it is a FIN, creacte FIN-ACK response
+			  - Send response to the client and print packet details that are being sent.
+
+## Design of Client
+
+## Problems we ran into
+
+## Additional libraries used
+
+
+
+## Acknowledgements/Resources used
