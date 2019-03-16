@@ -315,9 +315,11 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
   //receiving
   Header ack = serverSYNACK;
   char ackArray[HEADER_SIZE];
-
-  while (1)
+  auto start = chrono::system_clock::now();
+  auto end = chrono::system_clock::now();
+  while ((chrono::duration_cast<chrono::seconds>(end - start).count() < 10)) //TODO
   {
+    end = chrono::system_clock::now();
     if (seqNum > 102400) //Max sequenceNumber, reset
       seqNum = seqNum % (102401);
     if (ackNum > 102400) //Max acknowledgementNumber, reset
@@ -367,14 +369,21 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
       }
       if(rec_res > 0)
       {
+        start = chrono::system_clock::now();
         ack = convertByteArrayToHeader(ackArray);
         printPacketDetails(ack, RECV);
       }
     }
 
 
-   
+
   } //end of while
+  if (chrono::duration_cast<chrono::seconds>(end - start).count() >= 10)
+  {
+    printError("No response from server.");
+    exitOnError(sockfd);
+  }
+
   fin.close();
 
     Header fin_packet = createFIN(ack);
@@ -391,9 +400,9 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
     printPacketDetails(fin_packet,SEND);
 
 
-    
-    auto start = chrono::system_clock::now();
-    auto end = chrono::system_clock::now();
+
+     start = chrono::system_clock::now();
+     end = chrono::system_clock::now();
     while((chrono::duration_cast<chrono::seconds>(end - start).count() < 2))
     {
       end = chrono::system_clock::now();
