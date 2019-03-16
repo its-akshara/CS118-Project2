@@ -165,7 +165,7 @@ void connectionSetup(const struct sockaddr_in clientAddr)
   inet_ntop(clientAddr.sin_family, &clientAddr.sin_addr, ipstr, sizeof(ipstr));
 }
 
-void printPacketDetails(Header packet_header, msgType type, uint32_t cwnd = 512, uint32_t ssthresh = 10000, bool dup=false)
+void printPacketDetails(Header packet_header, msgType type, uint32_t cwnd, uint32_t ssthresh, bool dup=false)
 {
 
   if(type==DROP)
@@ -201,11 +201,25 @@ Header createFinalACK(Header ack)
   return h;
 }
 
+void updateWindow(uint32_t &cwnd, uint32_t &ssthresh){
+  if (cwnd < ssthresh)
+  {
+    cwnd += 512;
+  }
+  else  /*  cwnd >= ssthresh  */
+  {
+    cwnd += (512*512)/cwnd;
+  }
+  //cout << "\ncwnd: "<<cwnd<<" | ssthresh: " <<ssthresh<<endl;
+}
+
 void communicate(const int sockfd, const string filename, struct sockaddr_in serverAddr)
 {
   //------------ SYN Handshaking ------------//
 
   uint16_t connexID = 0;
+  uint32_t cwnd = 512;
+  uint32_t ssthresh = 10000;
 
   Header clientSYN;
   clientSYN.sequenceNumber = 12345;
@@ -241,7 +255,7 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
       printError("Unable to send SYN header to server");
       exitOnError(sockfd);
     }
-    printPacketDetails(clientSYN, SEND);
+    printPacketDetails(clientSYN, SEND, cwnd, ssthresh);
 
     //--- Wait for SYN ACK ---//
     poll(&fds, 1, timeout_msecs);
@@ -260,7 +274,7 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
           {
               receivedSYNACK = true;
               connexID = serverSYNACK.connectionID;
-              printPacketDetails(serverSYNACK, RECV);
+              printPacketDetails(serverSYNACK, RECV, cwnd, ssthresh);
               break;
           }
       }
@@ -288,7 +302,7 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
     exitOnError(sockfd);
   }
 
-  printPacketDetails(clientSYNACK_ACK, SEND);
+  printPacketDetails(clientSYNACK_ACK, SEND, cwnd, ssthresh);
   //-----------------------------------------// End of SYN Handshaking
 
   // send/receive data to/from connection
@@ -355,7 +369,7 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
       printError("Unable to send data to server");
       exitOnError(sockfd);
     }
-    printPacketDetails(payloadHeader,SEND);
+    printPacketDetails(payloadHeader, SEND, cwnd, ssthresh);
 
     //receive the ack for the response packet
     poll(&fds, 1, timeout_msecs);
@@ -371,7 +385,8 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
       {
         start = chrono::system_clock::now();
         ack = convertByteArrayToHeader(ackArray);
-        printPacketDetails(ack, RECV);
+        printPacketDetails(ack, RECV, cwnd, ssthresh);
+        updateWindow(cwnd, ssthresh);
       }
     }
 
@@ -397,10 +412,7 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
       exitOnError(sockfd);
     }
 
-    printPacketDetails(fin_packet,SEND);
-
-
-
+    printPacketDetails(fin_packet, SEND, cwnd, ssthresh);
      start = chrono::system_clock::now();
      end = chrono::system_clock::now();
     while((chrono::duration_cast<chrono::seconds>(end - start).count() < 2))
@@ -420,11 +432,11 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
           ack = convertByteArrayToHeader(ackArray);
           if(!ack.FINflag)
           {
-            printPacketDetails(ack,DROP);
+            printPacketDetails(ack, DROP, cwnd, ssthresh);
           }
           else
           {
-            printPacketDetails(ack, RECV);
+            printPacketDetails(ack, RECV, cwnd, ssthresh);
             Header finalACK = createFinalACK(ack);
             convertHeaderToByteArray(finalACK,finArray);
             if (sendto(sockfd, finArray, HEADER_SIZE, 0, (const sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
@@ -432,7 +444,7 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
               printError("Unable to send FIN to server");
               exitOnError(sockfd);
             }
-            printPacketDetails(finalACK,SEND);
+            printPacketDetails(finalACK, SEND, cwnd, ssthresh);
           }
       }
     }}
