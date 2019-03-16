@@ -123,6 +123,19 @@ void exitOnError(int sockfd)
   exit(1);
 }
 
+Header createFIN(Header ack)
+{
+  Header FIN;
+  FIN.acknowledgementNumber = 0;
+  FIN.connectionID = ack.connectionID;
+  FIN.ACKflag = 0;
+  FIN.SYNflag = 0;
+  FIN.FINflag = 1;
+  FIN.sequenceNumber = ack.acknowledgementNumber;
+
+  return FIN;
+}
+
 sockaddr_in createServerAddr(const int port, const string IP)
 {
   sockaddr_in serverAddr;
@@ -173,6 +186,18 @@ void printPacketDetails(Header packet_header, msgType type, uint32_t cwnd = 512,
     cout<<" DUP";
 
   cout<<endl;
+}
+
+Header createFinalACK(Header ack)
+{
+  Header h;
+  h.ACKflag = 1;
+  h.acknowledgementNumber = ack.sequenceNumber+1;
+  h.sequenceNumber = ack.acknowledgementNumber;
+  h.FINflag = 0;
+  h.SYNflag = 0;
+  h.connectionID = ack.connectionID;
+  return h;
 }
 
 void communicate(const int sockfd, const string filename, struct sockaddr_in serverAddr)
@@ -345,6 +370,48 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
         printPacketDetails(ack, RECV);
       }
     }
+
+    Header fin = createFIN(ack);
+    char finArray[DATA_SIZE];
+
+    convertHeaderToByteArray(fin,finArray);
+
+    if (sendto(sockfd, finArray, HEADER_SIZE, 0, (const sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
+    {
+      printError("Unable to send FIN to server");
+      exitOnError(sockfd);
+    }
+
+    printPacketDetails(fin,SEND);
+
+
+    poll(&fds, 1, timeout_msecs);
+    if (fds.revents != 0)         // An event on sockfd has occurred.
+    {
+      rec_res = recvfrom(sockfd, ackArray, HEADER_SIZE, 0, (struct sockaddr *)&serverAddr,&serverAddrLen);
+      if (rec_res == -1)
+      {
+        printError("Error in receiving SYN ACK from server");
+        exitOnError(sockfd);
+      }
+      if(rec_res > 0)
+      {
+        ack = convertByteArrayToHeader(ackArray);
+        printPacketDetails(ack, RECV);
+      }
+    }
+
+    Header finalACK = createFinalACK(ack);
+    convertHeaderToByteArray(finalACK,finArray);
+    if (sendto(sockfd, finArray, HEADER_SIZE, 0, (const sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
+    {
+      printError("Unable to send FIN to server");
+      exitOnError(sockfd);
+    }
+
+    printPacketDetails(finalACK,SEND);
+
+
     //-----------------------//
 
   /*  while (1)
