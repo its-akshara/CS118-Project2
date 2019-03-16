@@ -267,7 +267,7 @@ Header createACKHandshake(Header client, uint32_t payloadSize)
 
   if(serverACK.acknowledgementNumber>MAX_SEQACK)
   {
-    serverACK.acknowledgementNumber = serverACK.acknowledgementNumber% (MAX_SEQACK + 1) + payloadSize;
+    serverACK.acknowledgementNumber = serverACK.acknowledgementNumber% (MAX_SEQACK + 1);// + payloadSize;
   }
   if(serverACK.sequenceNumber>MAX_SEQACK)
   {
