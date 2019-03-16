@@ -33,10 +33,13 @@ To dissect tcpdump-recorded file, you can use `-r <pcapfile>` option. For exampl
 
 ## Names of Contributers with Contributions
 ### Arpi Beshlikyan, 404239449
+Arpi mainly worked on the client. She implemented the polling, designed the architecture of the client and worked with Melissa to implement congestion control.
+
 ### Melissa Cox, 704800126
+Melissa mainly worked on the client. She also worked on the client's 3-way handshake, FIN, timers. She worked with Arpi to implement congestion control.
 
 ### Akshara Sundararajan, 404731846
-I implemented the entirety of the server and helped out with the client's 3 way handshake. The basis of our code was from my project 1 code.
+Akshara implemented the entirety of the server and helped out with the client's 3 way handshake, FIN, timers. The basis of our code was from her project 1 code.
 
 ## Design of Server
 
@@ -63,10 +66,26 @@ The workflow is as follows:
 
 ## Design of Client
 
+We use an object called Header, and created functions to convert the byte array version of the header to an struct Header and vice versa.
+
+The workflow is as follows:
+- parseArguments() parses passed in arguments into an Arguments object, does correctness checking.
+- Set up the UDP connections, create server/client address, setup the connection.
+- communicate(): Contains all the logic related talking to the server, from the 3-way TCP handshake to the FIN
+    - printPacketDetails() displays required information on output.
+    - Send the SYN until you receive a SYN ACK
+    - Send the ACK to complete the 3 way handshake
+    - Setup a loop for as long as the server has communicated with the client in the past 10 seconds
+        - Use a map to keep track of expected ACKs mapped to the payload to be sent to the client
+        - Call updateWindow() to update ssthresh and cwnd each time an ACK is received.
+        - Send the packets with the payload from the file as long as the total number of bytes in the payloads across packets < CWND
+        - We have a vector keeping track of UNACK'ed packets
+    - Once the file is read and we receive the ACK for it, start the FIN using a timer of 2 seconds.
+
 ## Problems we ran into
 Figuring out wrap around for the server was difficult. Making sure the server can account for all types of missing packets was also hard.
 
-We had major issues implementing the client. We had issues with congestion control.
+We had major issues implementing the client. We had issues with congestion control. Also, there were inconsistencies with the golden server/client that made it hard to predict correct behaviour.
 
 ## Additional libraries used
 
