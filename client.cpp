@@ -326,26 +326,6 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
   uint32_t ackNum = 0; //TODO
 
   //------Map--------//
-  /*// produces map of int expected ack num : char * buffer (packet to send)
-map = generate_packet_map
-unacked = [] // will only be max cwnd size
-do
-   // send data in cwnd
-   for(int i = 0; i < cwnd/512; i++)
-      iterate through map, starting from first
-      send data
-      add to unacked
-
-   // receive acks
-   while (unacked not empty and timer not out)
-      receive packets, check with unacked []
-      keep track of dups
-
-   erase acked packets recvd from map if ALL in cwnd were acked
-while (!map.empty() && timer condition)
-
-   do not erase packets from map if any issues occur, will re-send on next while loop iter*/
-
   // map<int, Packet> payload_map;
   // vector<int> unACKed;
   //
