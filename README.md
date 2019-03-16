@@ -102,3 +102,6 @@ csignal
 climits
 
 ## Acknowledgements/Resources used
+https://en.wikipedia.org/wiki/Go-Back-N_ARQ
+https://www.geeksforgeeks.org/chrono-in-c/
+Piazza saved us, thank you TAs
