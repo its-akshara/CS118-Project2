@@ -397,19 +397,18 @@ void listenForPackets(int clientSockfd, string fileDir)
         char responsePacket[HEADER_SIZE];
 
         // print details
-        if(!isValidPacket(packet_header))
-        {
-          printPacketDetails(packet_header,DROP);
-          continue;
-        }
-        else if(outOfOrder(packet_header))
+        if(outOfOrder(packet_header))
         {
           response = connToLastInOrderACKSent[packet_header.connectionID];
           dup = true;
           printPacketDetails(packet_header,DROP);
         }
-        else{
-        if(!outOfOrder(packet_header))
+        else if(!isValidPacket(packet_header))
+        {
+          printPacketDetails(packet_header,DROP);
+          continue;
+        }
+        else if(!outOfOrder(packet_header))
         {
           printPacketDetails(packet_header,RECV);
           // if SYN then start 3 way handshake -> create new connection state
@@ -438,7 +437,7 @@ void listenForPackets(int clientSockfd, string fileDir)
         }
         convertHeaderToByteArray(response,responsePacket);
 
-        if(!receivedACK(packet_header))
+        if(!receivedACK(packet_header) && isValidPacket(packet_header))
         {
           if (sendto(clientSockfd, responsePacket, HEADER_SIZE, 0, (const sockaddr *)&clientAddr, clientAddrSize) == -1)
           {
@@ -446,7 +445,6 @@ void listenForPackets(int clientSockfd, string fileDir)
             exitOnError(clientSockfd);
           }
           printPacketDetails(response,SEND,dup);
-        }
         }
       }
 
