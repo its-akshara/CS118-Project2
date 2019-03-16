@@ -266,8 +266,8 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
   char c_clientPayloadHeader[HEADER_SIZE] = {0};
   Header clientPayloadHeader;
 
-  uint32_t seqNum = ??; //TODO
-  uint32_t ackNum = ??; //TODO
+  uint32_t seqNum = 0; //TODO
+  uint32_t ackNum = 0; //TODO
 
   //--------- Polling for payloads ---------//
   struct pollfd fds_socket;
@@ -304,7 +304,7 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
       //cout << "Header array: "<<c_clientPayloadHeader<<endl<<endl;
 
       //appending header and payload to packet to send
-      memcpy(buf_send,header,HEADER_SIZE);
+      memcpy(buf_send,c_clientPayloadHeader,HEADER_SIZE);
       memcpy(buf_send+12,buf, fin.gcount());
 
       //sending the packet and outputting required message
@@ -313,7 +313,7 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
         printError("Unable to send data to server");
         exitOnError(sockfd);
       }
-      cout << "SEND " << temp.sequenceNumber << " " << temp.acknowledgementNumber << " " << temp.connectionID << " " /*<CWND> <SS-THRESH>*/ << "ACK" << endl;
+      cout << "SEND " << clientPayloadHeader.sequenceNumber << " " << clientPayloadHeader.acknowledgementNumber << " " << clientPayloadHeader.connectionID << " " /*<CWND> <SS-THRESH>*/ << "ACK" << endl;
 
       //polling for ACK
       poll(&fds_socket, 1, timeout_msecs);
@@ -417,7 +417,6 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
   // fin.close();
 
   //fin stuff
-  //fin stuff
 
       // read/write data from/into the connection
       bool isEnd = false;
@@ -430,6 +429,7 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
 
           int rec_res = recvfrom(sockfd, buf, HEADER_SIZE, 0, (struct sockaddr *)&serverAddr, &serverAddrSize);
 
+          struct timeval timeout;
           timeout.tv_sec = 10;
           timeout.tv_usec = 0;
           if (rec_res == -1 && errno!=EWOULDBLOCK)

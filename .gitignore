@@ -3,6 +3,6 @@
 .vagrant
 server
 client
-server_test
+server_sample
 dir
 *~
