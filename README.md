@@ -31,10 +31,12 @@ To dissect tcpdump-recorded file, you can use `-r <pcapfile>` option. For exampl
 
     wireshark -X lua_script:./confundo.lua -r confundo.pcap
 
-## Names of Contributers
-Arpi Beshlikyan, 404239449
-Melissa Cox, 704800126
-Akshara Sundararajan, 404731846
+## Names of Contributers with Contributions
+### Arpi Beshlikyan, 404239449
+### Melissa Cox, 704800126
+
+### Akshara Sundararajan, 404731846
+I implemented the entirety of the server and helped out with the client's 3 way handshake. The basis of our code was from my project 1 code.
 
 ## Design of Server
 
@@ -62,9 +64,22 @@ The workflow is as follows:
 ## Design of Client
 
 ## Problems we ran into
+Figuring out wrap around for the server was difficult. Making sure the server can account for all types of missing packets was also hard.
+
+We had major issues implementing the client. We had issues with congestion control.
 
 ## Additional libraries used
 
-
+We used the following C/C++ headers in addition:
+iostream
+fstream
+unordered_map
+iomanip
+cstdint
+iostream
+thread
+chrono
+csignal
+climits
 
 ## Acknowledgements/Resources used
