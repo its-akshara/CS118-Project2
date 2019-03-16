@@ -3,6 +3,8 @@
 .vagrant
 server
 client
-server_sample
+server_test
 dir
+file.txt
+large_file.txt
 *~

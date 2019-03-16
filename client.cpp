@@ -11,8 +11,8 @@
 #include <errno.h>
 #include <unistd.h>
 #include <poll.h>
-#include <list>
 #include <iterator>
+#include <map>
 
 #include <iostream>
 #include <sstream>
@@ -54,6 +54,12 @@ struct Header
   bool SYNflag;
   bool FINflag;
 };
+
+// struct Packet
+// {
+//   char* payload;
+//   chrono::time_point<chrono::system_clock> timeLastSent;
+// };
 
 int32_t getFlags(bool ACKflag, bool SYNflag, bool FINflag)
 {
@@ -305,6 +311,32 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
   uint32_t seqNum = 12345; //TODO
   uint32_t ackNum = 0; //TODO
 
+  //------Map--------//
+  /*// produces map of int expected ack num : char * buffer (packet to send)
+map = generate_packet_map
+unacked = [] // will only be max cwnd size
+do
+   // send data in cwnd
+   for(int i = 0; i < cwnd/512; i++)
+      iterate through map, starting from first
+      send data
+      add to unacked
+
+   // receive acks
+   while (unacked not empty and timer not out)
+      receive packets, check with unacked []
+      keep track of dups
+
+   erase acked packets recvd from map if ALL in cwnd were acked
+while (!map.empty() && timer condition)
+
+   do not erase packets from map if any issues occur, will re-send on next while loop iter*/
+
+  // map<int, Packet> payload_map;
+  // vector<int> unACKed;
+  //
+  // Packet packet;
+
   //--------- Polling for payloads ---------//
   struct pollfd fds_socket;
   timeout_msecs = 500;
@@ -317,7 +349,8 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
   char ackArray[HEADER_SIZE];
   auto start = chrono::system_clock::now();
   auto end = chrono::system_clock::now();
-  while ((chrono::duration_cast<chrono::seconds>(end - start).count() < 10)) //TODO
+
+  while ((chrono::duration_cast<chrono::seconds>(end - start).count() < 10))
   {
     end = chrono::system_clock::now();
     if (seqNum > 102400) //Max sequenceNumber, reset
@@ -357,6 +390,10 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
     }
     printPacketDetails(payloadHeader,SEND);
 
+    // packet.payload = msgSend;
+    // packet.timeLastSent = chrono::system_clock::now();
+    // payload_map[ack.acknowledgementNumber] = packet;
+
     //receive the ack for the response packet
     poll(&fds, 1, timeout_msecs);
     if (fds.revents != 0)         // An event on sockfd has occurred.
@@ -375,8 +412,6 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
       }
     }
 
-
-
   } //end of while
   if (chrono::duration_cast<chrono::seconds>(end - start).count() >= 10)
   {
@@ -386,6 +421,8 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
 
   fin.close();
 
+
+//------- FIN/FIN ACK --------//
     Header fin_packet = createFIN(ack);
     char finArray[DATA_SIZE];
 
@@ -398,8 +435,6 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
     }
 
     printPacketDetails(fin_packet,SEND);
-
-
 
      start = chrono::system_clock::now();
      end = chrono::system_clock::now();
