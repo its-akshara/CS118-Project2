@@ -151,9 +151,34 @@ void connectionSetup(const struct sockaddr_in clientAddr)
   inet_ntop(clientAddr.sin_family, &clientAddr.sin_addr, ipstr, sizeof(ipstr));
 }
 
+void printPacketDetails(Header packet_header, msgType type, uint32_t cwnd = 512, uint32_t ssthresh = 10000, bool dup=false)
+{
+
+  if(type==DROP)
+    cout<<"DROP ";
+  else if(type==RECV)
+    cout<<"RECV ";
+  else
+    cout<<"SEND ";
+
+  cout<<packet_header.sequenceNumber<<" "<<packet_header.acknowledgementNumber<<" "<<packet_header.connectionID<<" "<<cwnd<<" "<<ssthresh;
+
+  if(packet_header.ACKflag)
+    cout<<" "<<"ACK";
+  if(packet_header.SYNflag)
+    cout<<" "<<"SYN";
+  if(packet_header.FINflag)
+    cout<<" "<<"FIN";
+  if(type==SEND && dup)
+    cout<<" DUP";
+
+  cout<<endl;
+}
+
 void communicate(const int sockfd, const string filename, struct sockaddr_in serverAddr)
 {
   //------------ SYN Handshaking ------------//
+
   uint16_t connexID = 0;
 
   Header clientSYN;
@@ -190,12 +215,7 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
       printError("Unable to send SYN header to server");
       exitOnError(sockfd);
     }
-    cout << "SEND " << clientSYN.sequenceNumber << " " << clientSYN.acknowledgementNumber << " " << clientSYN.connectionID << " " /*<CWND> <SS-THRESH>*/ << "SYN";
-    if (isSYN_DUP)
-      cout << " DUP" << endl;
-    else
-      cout << endl;
-    //----------------//
+    printPacketDetails(clientSYN, SEND);
 
     //--- Wait for SYN ACK ---//
     poll(&fds, 1, timeout_msecs);
@@ -214,7 +234,7 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
           {
               receivedSYNACK = true;
               connexID = serverSYNACK.connectionID;
-              cout << "RECV " << serverSYNACK.sequenceNumber << " " << serverSYNACK.acknowledgementNumber << " " << serverSYNACK.connectionID << " " /*<CWND> <SS-THRESH>*/ << "ACK SYN" << endl;
+              printPacketDetails(serverSYNACK, RECV);
               break;
           }
       }
@@ -226,8 +246,8 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
 
   //--- Send ACK for SYN ACK ---//
   Header clientSYNACK_ACK;
-  clientSYNACK_ACK.sequenceNumber = 12345;
-  clientSYNACK_ACK.acknowledgementNumber = 0;
+  clientSYNACK_ACK.sequenceNumber = serverSYNACK.acknowledgementNumber;
+  clientSYNACK_ACK.acknowledgementNumber = serverSYNACK.sequenceNumber+1;
   clientSYNACK_ACK.connectionID = connexID;
   clientSYNACK_ACK.ACKflag = 1;
   clientSYNACK_ACK.SYNflag = 0;
@@ -241,19 +261,9 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
     printError("Unable to send ACK for SYN ACK to server");
     exitOnError(sockfd);
   }
-  cout << "SEND " << clientSYNACK_ACK.sequenceNumber << " " << clientSYNACK_ACK.acknowledgementNumber << " " << clientSYNACK_ACK.connectionID << " " /*<CWND> <SS-THRESH>*/ << "ACK" << endl;
-  //----------------------------//
-  //-----------------------------------------// End of SYN Handshaking
 
-  /*struct Header
-  {
-    uint32_t sequenceNumber;
-    uint32_t acknowledgementNumber;
-    uint16_t connectionID;
-    bool ACKflag;
-    bool SYNflag;
-    bool FINflag;
-  };*/
+  printPacketDetails(clientSYNACK_ACK, SEND);
+  //-----------------------------------------// End of SYN Handshaking
 
   // send/receive data to/from connection
   fstream fin;
@@ -266,27 +276,78 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
   char c_clientPayloadHeader[HEADER_SIZE] = {0};
   Header clientPayloadHeader;
 
-  uint32_t seqNum = 0; //TODO
+  uint32_t seqNum = 12345; //TODO
   uint32_t ackNum = 0; //TODO
 
   //--------- Polling for payloads ---------//
   struct pollfd fds_socket;
   timeout_msecs = 500;
 
-
   fds_socket.fd = sockfd; //waiting for ACKS
   fds_socket.events = POLLIN;
 
-  while (!fin.eof())
+  //receiving
+  Header ack = serverSYNACK;
+  char ackArray[HEADER_SIZE];
+
+  while (1)
   {
     if (seqNum > 102400) //Max sequenceNumber, reset
-      seqNum = 0;
+      seqNum = seqNum % (102401);
     if (ackNum > 102400) //Max acknowledgementNumber, reset
-      ackNum = 0;
+      ackNum = ackNum % (102401);
 
     fin.read(buf, DATA_SIZE);
 
-    while (1)
+    //sending
+    char msgHeader[HEADER_SIZE];
+    char msgSend[HEADER_SIZE+fin.gcount()];
+
+    Header payloadHeader;
+    payloadHeader.sequenceNumber = ack.acknowledgementNumber;
+    payloadHeader.acknowledgementNumber = 0;
+    payloadHeader.connectionID = connexID;
+    payloadHeader.ACKflag = 0;
+    payloadHeader.SYNflag = 0;
+    payloadHeader.FINflag = 0;
+
+    //Check size of payload
+    //if 0, break
+    if(fin.gcount() == 0){
+      break;
+    }
+    //if not, create a reponse packet
+    convertHeaderToByteArray(payloadHeader, msgHeader);
+    //appending header and payload to packet to send
+    memcpy(msgSend,msgHeader,HEADER_SIZE);
+    memcpy(msgSend+12,buf,fin.gcount());
+    //send response packet
+    if (sendto(sockfd, msgSend, HEADER_SIZE+fin.gcount(), 0, (const sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
+    {
+      printError("Unable to send data to server");
+      exitOnError(sockfd);
+    }
+    printPacketDetails(payloadHeader,SEND);
+
+    //receive the ack for the response packet
+    poll(&fds, 1, timeout_msecs);
+    if (fds.revents != 0)         // An event on sockfd has occurred.
+    {
+      rec_res = recvfrom(sockfd, ackArray, HEADER_SIZE, 0, (struct sockaddr *)&serverAddr,&serverAddrLen);
+      if (rec_res == -1)
+      {
+        printError("Error in receiving SYN ACK from server");
+        exitOnError(sockfd);
+      }
+      if(rec_res > 0)
+      {
+        ack = convertByteArrayToHeader(ackArray);
+        printPacketDetails(ack, RECV);
+      }
+    }
+    //-----------------------//
+
+  /*  while (1)
     {
       //---send buffer contents over and over until you get an ACK---//
       //setting up packet to send
@@ -313,8 +374,6 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
         printError("Unable to send data to server");
         exitOnError(sockfd);
       }
-      cout << "SEND " << clientPayloadHeader.sequenceNumber << " " << clientPayloadHeader.acknowledgementNumber << " " << clientPayloadHeader.connectionID << " " /*<CWND> <SS-THRESH>*/ << "ACK" << endl;
-
       //polling for ACK
       poll(&fds_socket, 1, timeout_msecs);
       if (fds_socket.revents != 0)       // An event on sockfd has occurred.
@@ -331,12 +390,12 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
             if (serverACK.ACKflag && !serverACK.SYNflag && !serverACK.FINflag)
             {
                 connexID = serverACK.connectionID;
-                cout << "RECV " << serverACK.sequenceNumber << " " << serverACK.acknowledgementNumber << " " << serverACK.connectionID << " " /*<CWND> <SS-THRESH>*/ << "ACK" << endl;
                 break;
             }
         }
       } //end of if poll event happens
     } // end of attempting to send packet
+    */
     //-------------------------------------------------------------//
   } //end of while
   fin.close();
@@ -417,7 +476,7 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
   // fin.close();
 
   //fin stuff
-
+/*
       // read/write data from/into the connection
       bool isEnd = false;
       bool dup = false;
@@ -432,6 +491,7 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
           struct timeval timeout;
           timeout.tv_sec = 10;
           timeout.tv_usec = 0;
+
           if (rec_res == -1 && errno!=EWOULDBLOCK)
             {
     	        printError("Error in receiving data");
@@ -450,7 +510,7 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
             char responsePacket[HEADER_SIZE];
             cout <<endl;
             cout << "Header contents received: \n";
-            cout<< "SEQ:"<<packet_header.sequenceNumber <<" ACK:"<<packet_header.acknowledgementNumber<<endl;
+            cout << "SEQ:"<<packet_header.sequenceNumber <<" ACK:"<<packet_header.acknowledgementNumber<<endl;
             cout <<"CONN ID:"<<packet_header.connectionID<<endl;
             cout << "SYN:"<<packet_header.SYNflag <<" ACK:"<<packet_header.ACKflag << " FIN:"<<packet_header.FINflag<<endl;
 
@@ -467,8 +527,7 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
           findata.FINflag = 1;
           cout <<endl;
           cout << "Header contents set to fin data: \n";
-          cout<< "SEQ:"<<packet_header.sequenceNumber <<" ACK:"<<packet_header.acknowledgementNumber<<endl;
-          cout <<"CONN ID:"<<packet_header.connectionID<<endl;
+          cout << ID:"<<packet_header.connectionID<<endl;
           cout << "SYN:"<<packet_header.SYNflag <<" ACK:"<<packet_header.ACKflag << " FIN:"<<packet_header.FINflag<<endl;
 
           cout <<endl;
@@ -493,7 +552,7 @@ void communicate(const int sockfd, const string filename, struct sockaddr_in ser
               //Respond to each incoming FIN with an ACK pkt////////////////////////////////
             }
           }
-        }
+        }*/
         cout << "\n wait 2 secs for pkt with fin\n";
         cout << "\n close connection \n";
 }
